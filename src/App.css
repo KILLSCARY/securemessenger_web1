@@ -79,18 +79,16 @@ input  { font-family: inherit; }
 .auth-glow1 { display: none; }
 .auth-glow2 { display: none; }
 
-/* Hero: full-width banner, screen blend erases dark background */
+/* Hero: transparent PNG banner, no blend mode needed */
 .auth-hero {
     width: calc(100% + 48px);
     margin-left: -24px;
-    margin-top: -16px;
+    margin-top: -8px;
 }
 .auth-banner-img {
     width: 100%;
     display: block;
-    mix-blend-mode: screen;
-    /* boost contrast so glow pops */
-    filter: brightness(1.1) contrast(1.05);
+    filter: drop-shadow(0 0 30px rgba(234,179,8,.4));
 }
 
 .auth-sub { color: var(--sub); font-size: 15px; width: 100%; }
