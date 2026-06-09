@@ -76,37 +76,21 @@ input  { font-family: inherit; }
     padding: 48px 24px calc(40px + env(safe-area-inset-bottom, 0px));
     position: relative; gap: 20px;
 }
-.auth-glow1 {
-    position: absolute; top: -20px; left: -60px;
-    width: 360px; height: 360px; border-radius: 50%;
-    background: rgba(234,179,8,.28); filter: blur(100px); pointer-events: none;
-}
-.auth-glow2 {
-    position: absolute; bottom: 80px; right: -80px;
-    width: 260px; height: 260px; border-radius: 50%;
-    background: rgba(217,119,6,.12); filter: blur(80px); pointer-events: none;
-}
+.auth-glow1 { display: none; }
+.auth-glow2 { display: none; }
 
-/* Hero row: logo blended + stacked title */
+/* Hero: full-width banner, screen blend erases dark background */
 .auth-hero {
-    display: flex; align-items: center; gap: 4px; width: 100%;
-    position: relative;
+    width: calc(100% + 48px);
+    margin-left: -24px;
+    margin-top: -16px;
 }
-/* Logo без рамки — mix-blend-mode screen делает чёрный фон прозрачным */
-.auth-logo-img {
-    width: 130px; height: 130px; flex-shrink: 0;
-    object-fit: cover; display: block;
+.auth-banner-img {
+    width: 100%;
+    display: block;
     mix-blend-mode: screen;
-    filter: drop-shadow(0 0 40px rgba(234,179,8,.9)) drop-shadow(0 0 80px rgba(234,179,8,.5));
-    margin-left: -12px;
-}
-.auth-title-stack {
-    display: flex; flex-direction: column; line-height: 1;
-}
-.auth-title-line {
-    font-size: 46px; font-weight: 900; color: var(--accent);
-    letter-spacing: 1px; line-height: 1.05;
-    text-shadow: 0 0 30px rgba(234,179,8,.6);
+    /* boost contrast so glow pops */
+    filter: brightness(1.1) contrast(1.05);
 }
 
 .auth-sub { color: var(--sub); font-size: 15px; width: 100%; }

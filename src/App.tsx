@@ -409,12 +409,7 @@ function App() {
                 <div className="auth-glow1" /><div className="auth-glow2" />
 
                 <div className="auth-hero">
-                    <img className="auth-logo-img" src="/nss-icon.png" alt="NSS" />
-                    <div className="auth-title-stack">
-                        <span className="auth-title-line">НЕ</span>
-                        <span className="auth-title-line">СУЩИЙ</span>
-                        <span className="auth-title-line">СВЕТ</span>
-                    </div>
+                    <img className="auth-banner-img" src="/nss-banner.jpg" alt="НЕ СУЩИЙ СВЕТ" />
                 </div>
                 <p className="auth-sub">Клуб. Курсы. Общение.</p>
 
