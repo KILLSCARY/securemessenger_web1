@@ -72,40 +72,42 @@ input  { font-family: inherit; }
 .auth-wrap {
     flex: 1; overflow-y: auto;
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     padding: 0 24px calc(40px + env(safe-area-inset-bottom, 0px));
-    position: relative; gap: 20px;
+    position: relative; gap: 16px;
 }
 .auth-glow1 { display: none; }
 .auth-glow2 { display: none; }
 
-/* Hero: glowing crystal JPEG as bg, contrast darkens the olive bg,
-   radial+linear masks fade all edges into app background */
+/* Hero: graffiti logo full width, plain display */
 .auth-hero {
     width: calc(100% + 48px);
     margin-left: -24px;
     margin-top: -48px;
-    height: 68vw;
-    max-height: 300px;
     position: relative;
-    background: url('/nss-banner.jpg') center 45% / cover no-repeat;
-    filter: contrast(1.6) brightness(0.85);
-    /* fade all 4 edges into app bg */
-    -webkit-mask-image:
-        linear-gradient(to bottom,  #000 40%, transparent 100%),
-        linear-gradient(to right,   #000 60%, transparent 100%),
-        linear-gradient(to left,    #000 60%, transparent 100%),
-        linear-gradient(to top,     #000 80%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-image:
-        linear-gradient(to bottom,  #000 40%, transparent 100%),
-        linear-gradient(to right,   #000 60%, transparent 100%),
-        linear-gradient(to left,    #000 60%, transparent 100%),
-        linear-gradient(to top,     #000 80%, transparent 100%);
-    mask-composite: intersect;
+    line-height: 0;
+}
+.auth-banner-img {
+    width: 100%;
+    display: block;
+}
+.auth-hero-fade {
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 45%;
+    background: linear-gradient(to bottom, transparent, var(--bg));
+    pointer-events: none;
+}
+.auth-title-block {
+    width: 100%;
+    text-align: left;
+    margin-top: -8px;
+}
+.auth-brand {
+    font-size: 28px; font-weight: 900; color: var(--text);
+    letter-spacing: 0.3px; margin-bottom: 4px;
 }
 
-.auth-sub { color: var(--sub); font-size: 15px; width: 100%; text-align: center; }
+.auth-sub { color: var(--sub); font-size: 14px; }
 
 /* Feature icons row — чисто, без карточек */
 .auth-features {

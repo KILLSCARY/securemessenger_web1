@@ -408,8 +408,15 @@ function App() {
             <div className="auth-wrap">
                 <div className="auth-glow1" /><div className="auth-glow2" />
 
-                <div className="auth-hero" />
-                <p className="auth-sub">Клуб. Курсы. Общение.</p>
+                <div className="auth-hero">
+                    <img className="auth-banner-img" src="/nss-logo.jpg" alt="НЕ СУЩИЙ СВЕТ" />
+                    <div className="auth-hero-fade" />
+                </div>
+
+                <div className="auth-title-block">
+                    <h1 className="auth-brand">Не Сущий Свет</h1>
+                    <p className="auth-sub">Клуб. Курсы. Общение.</p>
+                </div>
 
                 <div className="auth-box">
                     <div className="auth-tabs">
