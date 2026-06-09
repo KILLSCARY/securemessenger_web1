@@ -89,7 +89,6 @@ export const getParticipantPublicKeys = async (chatId) => {
 
 export const createUserProfile = async (userId, username, email) => {
     try {
-        const usersRef = collection(db, 'users');
         const userDoc = {
             userId,
             username,
@@ -101,7 +100,8 @@ export const createUserProfile = async (userId, username, email) => {
             createdAt: serverTimestamp(),
             publicKey: null
         };
-        await addDoc(usersRef, userDoc);
+        // Use userId as document ID to prevent duplicate documents
+        await setDoc(doc(db, 'users', userId), userDoc, { merge: true });
         return userDoc;
     } catch (error) {
         console.error('Error creating profile:', error);
@@ -111,8 +111,11 @@ export const createUserProfile = async (userId, username, email) => {
 
 export const getUserProfile = async (userId) => {
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('userId', '==', userId), limit(1));
+        // Direct lookup by document ID (fast, no duplicates)
+        const snap = await getDoc(doc(db, 'users', userId));
+        if (snap.exists()) return { id: snap.id, ...snap.data() };
+        // Fallback: query for old-style documents with auto-generated IDs
+        const q = query(collection(db, 'users'), where('userId', '==', userId), limit(1));
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
         return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
@@ -124,12 +127,7 @@ export const getUserProfile = async (userId) => {
 
 export const updateUserProfile = async (userId, updates) => {
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('userId', '==', userId), limit(1));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-            await updateDoc(doc(db, 'users', snapshot.docs[0].id), updates);
-        }
+        await setDoc(doc(db, 'users', userId), updates, { merge: true });
     } catch (error) {
         console.error('Error updating profile:', error);
     }
@@ -140,7 +138,14 @@ export const getOnlineUsers = async () => {
         const usersRef = collection(db, 'users');
         const q = query(usersRef, where('status', '==', 'online'));
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Deduplicate by userId (old addDoc approach could create multiple docs per user)
+        const seen = new Set<string>();
+        return users.filter(u => {
+            if (!u.userId || seen.has(u.userId)) return false;
+            seen.add(u.userId);
+            return true;
+        });
     } catch (error) {
         console.error('Error getting online users:', error);
         return [];
@@ -327,9 +332,6 @@ export const getUserChats = async (userId) => {
         );
         const snapshot = await getDocs(q);
         
-        const userProfile = await getUserProfile(userId);
-        const usersRef = collection(db, 'users');
-        
         const chats = [];
         for (const docSnap of snapshot.docs) {
             const chatData = docSnap.data();
@@ -337,11 +339,7 @@ export const getUserChats = async (userId) => {
             
             let partnerProfile = null;
             if (partnerId) {
-                const partnerQ = query(usersRef, where('userId', '==', partnerId), limit(1));
-                const partnerSnap = await getDocs(partnerQ);
-                if (!partnerSnap.empty) {
-                    partnerProfile = { id: partnerSnap.docs[0].id, ...partnerSnap.docs[0].data() };
-                }
+                partnerProfile = await getUserProfile(partnerId);
             }
             
             chats.push({
