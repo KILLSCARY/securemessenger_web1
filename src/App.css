@@ -88,10 +88,9 @@ input  { font-family: inherit; }
 .auth-banner-img {
     width: 100%;
     display: block;
-    filter: drop-shadow(0 0 30px rgba(234,179,8,.4));
 }
 
-.auth-sub { color: var(--sub); font-size: 15px; width: 100%; }
+.auth-sub { color: var(--sub); font-size: 15px; width: 100%; text-align: center; }
 
 /* Feature icons row — чисто, без карточек */
 .auth-features {
