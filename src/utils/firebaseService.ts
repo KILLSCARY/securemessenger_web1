@@ -1,9 +1,9 @@
-import { 
-    collection, 
-    addDoc, 
-    query, 
-    where, 
-    orderBy, 
+import {
+    collection,
+    addDoc,
+    query,
+    where,
+    orderBy,
     onSnapshot,
     doc,
     updateDoc,
@@ -13,15 +13,11 @@ import {
     limit,
     setDoc
 } from 'firebase/firestore';
-import { 
-    ref, 
-    uploadBytes, 
-    getDownloadURL 
-} from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import CryptoJS from 'crypto-js';
 
-// Synchronous AES-256-CBC helpers — no async/Web Crypto dependency
+// ── Encryption ────────────────────────────────────────────────────
 const encryptText = (text: string, keyHex: string) => {
     const key = CryptoJS.enc.Hex.parse(keyHex);
     const iv  = CryptoJS.lib.WordArray.random(16);
@@ -47,81 +43,86 @@ const decryptText = (ciphertext: string, ivHex: string, keyHex: string): string 
     } catch { return ''; }
 };
 
+// ── Profile cache (avoids repeated Firestore reads for the same user) ──
+const profileCache = new Map<string, any>();
 
-export const createUserProfile = async (userId, username, email) => {
+// ── Users ─────────────────────────────────────────────────────────
+export const createUserProfile = async (userId: string, username: string, email: string) => {
     try {
         const userDoc = {
-            userId,
-            username,
-            email,
+            userId, username, email,
             avatar: null,
             status: 'online',
             lastSeen: serverTimestamp(),
             bio: '',
             createdAt: serverTimestamp(),
-            publicKey: null
         };
-        // Use userId as document ID to prevent duplicate documents
         await setDoc(doc(db, 'users', userId), userDoc, { merge: true });
-        return userDoc;
+        const result = { id: userId, ...userDoc };
+        profileCache.set(userId, result);
+        return result;
     } catch (error) {
         console.error('Error creating profile:', error);
         return null;
     }
 };
 
-export const getUserProfile = async (userId) => {
+export const getUserProfile = async (userId: string) => {
+    if (profileCache.has(userId)) return profileCache.get(userId);
     try {
-        // Direct lookup by document ID (fast, no duplicates)
         const snap = await getDoc(doc(db, 'users', userId));
-        if (snap.exists()) return { id: snap.id, ...snap.data() };
-        // Fallback: query for old-style documents with auto-generated IDs
+        if (snap.exists()) {
+            const profile = { id: snap.id, ...snap.data() };
+            profileCache.set(userId, profile);
+            return profile;
+        }
+        // Fallback for old-style auto-ID docs
         const q = query(collection(db, 'users'), where('userId', '==', userId), limit(1));
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
         const profileData = snapshot.docs[0].data();
-        // Silently migrate to canonical path so future lookups are fast
         setDoc(doc(db, 'users', userId), profileData, { merge: true }).catch(() => {});
-        return { id: snapshot.docs[0].id, ...profileData };
+        const profile = { id: snapshot.docs[0].id, ...profileData };
+        profileCache.set(userId, profile);
+        return profile;
     } catch (error) {
         console.error('Error getting profile:', error);
         return null;
     }
 };
 
-export const updateUserProfile = async (userId, updates) => {
+export const updateUserProfile = async (userId: string, updates: any) => {
     try {
         await setDoc(doc(db, 'users', userId), { userId, lastSeen: serverTimestamp(), ...updates }, { merge: true });
+        // Invalidate cache so next read gets fresh data
+        profileCache.delete(userId);
     } catch (error) {
         console.error('Error updating profile:', error);
     }
 };
 
-export const getOnlineUsers = async () => {
-    try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('status', '==', 'online'));
-        const snapshot = await getDocs(q);
-        const users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const cutoff = Date.now() - 5 * 60 * 1000;
+// Real-time online users — no polling needed
+export const subscribeToOnlineUsers = (currentUserId: string, callback: (users: any[]) => void) => {
+    const q = query(collection(db, 'users'), where('status', '==', 'online'));
+    return onSnapshot(q, (snapshot) => {
         const seen = new Set<string>();
-        return users.filter((u: any) => {
-            if (!u.userId || seen.has(u.userId)) return false;
-            const ls = u.lastSeen?.toDate?.()?.getTime?.() ?? Date.now();
-            if (ls < cutoff) return false;
-            seen.add(u.userId);
-            return true;
-        });
-    } catch (error) {
-        console.error('Error getting online users:', error);
-        return [];
-    }
+        const users = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter((u: any) => {
+                if (!u.userId || u.userId === currentUserId || seen.has(u.userId)) return false;
+                seen.add(u.userId);
+                return true;
+            });
+        callback(users);
+    }, (err) => {
+        console.error('Online users subscription error:', err);
+        callback([]);
+    });
 };
 
-
-export const saveMessage = async (chatId, message, sessionKey) => {
+// ── Messages ─────────────────────────────────────────────────────
+export const saveMessage = async (chatId: string, message: any, sessionKey: string) => {
     const encrypted = encryptText(message.text || '', sessionKey);
-
     const messageDoc: any = {
         senderId: message.senderId,
         senderName: message.senderName,
@@ -129,7 +130,7 @@ export const saveMessage = async (chatId, message, sessionKey) => {
         iv: encrypted.iv,
         timestamp: serverTimestamp(),
         reactions: [],
-        readBy: [message.senderId]
+        readBy: [message.senderId],
     };
     if (message.fileUrl)  messageDoc.fileUrl  = message.fileUrl;
     if (message.fileType) messageDoc.fileType = message.fileType;
@@ -138,37 +139,33 @@ export const saveMessage = async (chatId, message, sessionKey) => {
     await addDoc(collection(db, 'chats', chatId, 'messages'), messageDoc);
 
     await setDoc(doc(db, 'chats', chatId), {
+        chatId,
         lastMessage: message.fileUrl ? `📎 ${message.fileName || 'Файл'}` : (message.text || '').substring(0, 60),
-        lastMessageTime: serverTimestamp()
+        lastMessageTime: serverTimestamp(),
     }, { merge: true });
 };
 
 export const subscribeToMessages = (chatId: string, sessionKey: string, callback: (msgs: any[]) => void) => {
     if (!chatId || !sessionKey) { callback([]); return () => {}; }
 
-    const q = query(
-        collection(db, 'chats', chatId, 'messages'),
-        orderBy('timestamp', 'asc')
-    );
+    const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'asc'));
 
     return onSnapshot(q, (snapshot) => {
-        const msgs: any[] = [];
-        for (const docSnap of snapshot.docs) {
+        const msgs = snapshot.docs.map(docSnap => {
             const data = docSnap.data();
-            const text = decryptText(data.encryptedText || '', data.iv || '', sessionKey);
-            msgs.push({
+            return {
                 id: docSnap.id,
-                senderId: data.senderId,
+                senderId:   data.senderId,
                 senderName: data.senderName,
-                text,
-                fileUrl: data.fileUrl ?? null,
-                fileType: data.fileType ?? null,
-                fileName: data.fileName ?? null,
-                timestamp: data.timestamp?.toDate(),
-                reactions: data.reactions ?? [],
-                readBy: data.readBy ?? [],
-            });
-        }
+                text:       decryptText(data.encryptedText || '', data.iv || '', sessionKey),
+                fileUrl:    data.fileUrl  ?? null,
+                fileType:   data.fileType ?? null,
+                fileName:   data.fileName ?? null,
+                timestamp:  data.timestamp?.toDate() ?? null,
+                reactions:  data.reactions ?? [],
+                readBy:     data.readBy ?? [],
+            };
+        });
         callback(msgs);
     }, (err) => {
         console.error('Messages subscription error:', err);
@@ -176,21 +173,15 @@ export const subscribeToMessages = (chatId: string, sessionKey: string, callback
     });
 };
 
-export const addReaction = async (chatId, messageId, userId, emoji) => {
+export const addReaction = async (chatId: string, messageId: string, userId: string, emoji: string) => {
     try {
         const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
         const messageSnap = await getDoc(messageRef);
-
         if (messageSnap.exists()) {
             const reactions = messageSnap.data().reactions || [];
-            const existingIndex = reactions.findIndex(r => r.userId === userId && r.emoji === emoji);
-
-            if (existingIndex >= 0) {
-                reactions.splice(existingIndex, 1);
-            } else {
-                reactions.push({ userId, emoji, timestamp: Date.now() });
-            }
-
+            const existing = reactions.findIndex((r: any) => r.userId === userId && r.emoji === emoji);
+            if (existing >= 0) reactions.splice(existing, 1);
+            else reactions.push({ userId, emoji, timestamp: Date.now() });
             await updateDoc(messageRef, { reactions });
         }
     } catch (error) {
@@ -198,7 +189,8 @@ export const addReaction = async (chatId, messageId, userId, emoji) => {
     }
 };
 
-export const createChat = async (user1Id, user2Id) => {
+// ── Chats ─────────────────────────────────────────────────────────
+export const createChat = async (user1Id: string, user2Id: string) => {
     const chatId = [user1Id, user2Id].sort().join('_');
     try {
         const chatRef = doc(db, 'chats', chatId);
@@ -209,7 +201,7 @@ export const createChat = async (user1Id, user2Id) => {
                 participants: [user1Id, user2Id],
                 lastMessage: null,
                 lastMessageTime: serverTimestamp(),
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
             });
             await setDoc(doc(db, 'chatKeys', chatId), { chatId, createdAt: serverTimestamp() }, { merge: true });
         }
@@ -220,77 +212,54 @@ export const createChat = async (user1Id, user2Id) => {
     }
 };
 
-export const getUserChats = async (userId) => {
-    try {
-        const chatsRef = collection(db, 'chats');
-        const q = query(
-            chatsRef, 
-            where('participants', 'array-contains', userId),
-            orderBy('lastMessageTime', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        
-        const chats = [];
+// Real-time chat list — no orderBy so no composite index required; sorted in JS
+export const subscribeToChats = (userId: string, callback: (chats: any[]) => void) => {
+    const q = query(collection(db, 'chats'), where('participants', 'array-contains', userId));
+    return onSnapshot(q, async (snapshot) => {
+        const chats: any[] = [];
         for (const docSnap of snapshot.docs) {
-            const chatData = docSnap.data();
-            const partnerId = chatData.participants.find(p => p !== userId);
-            
-            let partnerProfile = null;
-            if (partnerId) {
-                partnerProfile = await getUserProfile(partnerId);
-            }
-            
+            const data = docSnap.data();
+            const chatId = data.chatId || docSnap.id;
+            const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
+            const partner = partnerId ? await getUserProfile(partnerId) : null;
             chats.push({
                 id: docSnap.id,
-                chatId: chatData.chatId,
+                chatId,
                 partnerId,
-                partner: partnerProfile,
-                lastMessage: chatData.lastMessage,
-                lastMessageTime: chatData.lastMessageTime?.toDate(),
-                unreadCount: 0
+                partner,
+                lastMessage: data.lastMessage ?? null,
+                lastMessageTime: data.lastMessageTime?.toDate() ?? null,
+                unreadCount: 0,
             });
         }
-        
-        return chats;
-    } catch (error) {
-        console.error('Error getting chats:', error);
-        return [];
-    }
+        chats.sort((a, b) => (b.lastMessageTime?.getTime() ?? 0) - (a.lastMessageTime?.getTime() ?? 0));
+        callback(chats);
+    }, (err) => {
+        console.error('Chats subscription error:', err);
+        callback([]);
+    });
 };
 
+// ── Session Key ───────────────────────────────────────────────────
 export const getChatSessionKey = async (chatId: string, userId: string): Promise<string> => {
     const keyName = `chat_key_${chatId}`;
-
-    // 1. Check session storage first (fastest path, survives tab switches)
     const cached = sessionStorage.getItem(keyName);
-    if (cached) {
-        return JSON.parse(cached).key;
-    }
+    if (cached) return JSON.parse(cached).key;
 
-    // 2. Retrieve shared key from Firestore so both participants use the SAME key
     try {
-        const chatKeyRef = doc(db, 'chatKeys', chatId);
-        const snapshot = await getDoc(chatKeyRef);
+        const snapshot = await getDoc(doc(db, 'chatKeys', chatId));
         if (snapshot.exists() && snapshot.data()?.sharedKey) {
-            const sharedKey = snapshot.data().sharedKey as string;
-            sessionStorage.setItem(keyName, JSON.stringify({ key: sharedKey, createdAt: Date.now() }));
-            return sharedKey;
+            const key = snapshot.data().sharedKey as string;
+            sessionStorage.setItem(keyName, JSON.stringify({ key, createdAt: Date.now() }));
+            return key;
         }
-    } catch (e) {
-        console.error('Error loading chat key from Firestore:', e);
-    }
+    } catch (e) { console.error('Error loading chat key:', e); }
 
-    // 3. First user to open this chat: generate key and persist it
     const newKey = generateRandomKey();
     sessionStorage.setItem(keyName, JSON.stringify({ key: newKey, createdAt: Date.now() }));
-
     try {
-        const chatKeyRef = doc(db, 'chatKeys', chatId);
-        await setDoc(chatKeyRef, { sharedKey: newKey }, { merge: true });
-    } catch (e) {
-        console.error('Error saving chat key to Firestore:', e);
-    }
-
+        await setDoc(doc(db, 'chatKeys', chatId), { sharedKey: newKey }, { merge: true });
+    } catch (e) { console.error('Error saving chat key:', e); }
     return newKey;
 };
 
@@ -300,7 +269,8 @@ function generateRandomKey() {
     return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const uploadAvatar = async (userId, file) => {
+// ── Storage ───────────────────────────────────────────────────────
+export const uploadAvatar = async (userId: string, file: File) => {
     try {
         const avatarRef = ref(storage, `avatars/${userId}`);
         await uploadBytes(avatarRef, file);
@@ -313,8 +283,8 @@ export const uploadAvatar = async (userId, file) => {
     }
 };
 
-export const uploadFile = async (chatId, file, senderId) => {
-    const ext = file.name.split('.').pop() || 'bin';
+export const uploadFile = async (chatId: string, file: File, senderId: string) => {
+    const ext  = file.name.split('.').pop() || 'bin';
     const path = `files/${chatId}/${senderId}_${Date.now()}.${ext}`;
     const fileRef = ref(storage, path);
     await uploadBytes(fileRef, file);
@@ -322,86 +292,20 @@ export const uploadFile = async (chatId, file, senderId) => {
     return { url, name: file.name, type: file.type };
 };
 
-export const uploadStatus = async (userId, file, type = 'image') => {
+// ── Typing ────────────────────────────────────────────────────────
+export const setTypingStatus = async (chatId: string, userId: string, isTyping: boolean) => {
     try {
-        const statusRef = ref(storage, `statuses/${userId}_${Date.now()}`);
-        await uploadBytes(statusRef, file);
-        const url = await getDownloadURL(statusRef);
-        
-        const statusesRef = collection(db, 'statuses');
-        await addDoc(statusesRef, {
-            userId,
-            type,
-            url,
-            createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
-        
-        return url;
-    } catch (error) {
-        console.error('Error uploading status:', error);
-        return null;
-    }
-};
-
-export const getStatuses = async () => {
-    try {
-        const statusesRef = collection(db, 'statuses');
-        const now = new Date();
-        const q = query(
-            statusesRef,
-            orderBy('createdAt', 'desc'),
-            limit(20)
-        );
-        const snapshot = await getDocs(q);
-        
-        const statuses = [];
-        for (const docSnap of snapshot.docs) {
-            const data = docSnap.data();
-            if (data.expiresAt && data.expiresAt.toDate && data.expiresAt.toDate() > now) {
-                const userProfile = await getUserProfile(data.userId);
-                statuses.push({
-                    id: docSnap.id,
-                    ...data,
-                    user: userProfile
-                });
-            }
-        }
-        return statuses;
-    } catch (error) {
-        console.error('Error getting statuses:', error);
-        return [];
-    }
-};
-
-export const setTypingStatus = async (chatId, userId, isTyping) => {
-    try {
-        const typingRef = doc(db, 'typing', chatId, 'status', userId);
-        await setDoc(typingRef, {
-            userId,
-            isTyping,
-            timestamp: serverTimestamp()
+        await setDoc(doc(db, 'typing', chatId, 'status', userId), {
+            userId, isTyping, timestamp: serverTimestamp(),
         }, { merge: true });
-    } catch (error) {
-        console.error('Error setting typing status:', error);
-    }
+    } catch (error) { console.error('Error setting typing status:', error); }
 };
 
-export const subscribeToTyping = (chatId, userId, callback) => {
+export const subscribeToTyping = (chatId: string, userId: string, callback: (users: string[]) => void) => {
     try {
-        const typingRef = collection(db, 'typing', chatId, 'status');
-        const q = query(typingRef, where('isTyping', '==', true));
-        
-        return onSnapshot(q, (snapshot) => {
-            const typingUsers = snapshot.docs
-                .filter(d => d.id !== userId)
-                .map(d => d.id);
-            callback(typingUsers);
-        });
-    } catch (error) {
-        console.error('Error subscribing to typing:', error);
-        callback([]);
-        return () => {};
-    }
+        return onSnapshot(
+            query(collection(db, 'typing', chatId, 'status'), where('isTyping', '==', true)),
+            (snapshot) => callback(snapshot.docs.filter(d => d.id !== userId).map(d => d.id)),
+        );
+    } catch { callback([]); return () => {}; }
 };
-

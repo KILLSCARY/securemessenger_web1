@@ -9,8 +9,8 @@ import {
     createUserProfile, getUserProfile, updateUserProfile,
     subscribeToMessages, saveMessage, addReaction,
     uploadAvatar, getChatSessionKey, setTypingStatus,
-    subscribeToTyping, getUserChats, createChat,
-    getOnlineUsers, uploadFile, getStatuses, uploadStatus
+    subscribeToTyping, subscribeToChats, createChat,
+    subscribeToOnlineUsers, uploadFile
 } from './utils/firebaseService';
 import './App.css';
 
@@ -149,23 +149,17 @@ function App() {
 
     useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-    // Chats & online
-    const loadChats = useCallback(async () => {
-        if (!user) return;
-        setChats(await getUserChats(user.uid));
-    }, [user]);
-
+    // Real-time chats & online users — no polling
     useEffect(() => {
         if (!user) return;
-        loadChats();
-        getStatuses();
-        getOnlineUsers().then((us: any[]) => setOnline(us.filter(u => u.userId !== user.uid)));
-        const iv = setInterval(async () => {
-            const us = await getOnlineUsers();
-            setOnline(us.filter((u: any) => u.userId !== user.uid));
-        }, 5000);
-        return () => clearInterval(iv);
-    }, [user, loadChats]);
+        const unsubChats = subscribeToChats(user.uid, setChats);
+        const unsubOnline = subscribeToOnlineUsers(user.uid, setOnline);
+        // Heartbeat: keep lastSeen fresh so we stay visible as online
+        const heartbeat = setInterval(() => {
+            updateUserProfile(user.uid, { status: 'online' });
+        }, 90_000);
+        return () => { unsubChats(); unsubOnline(); clearInterval(heartbeat); };
+    }, [user]);
 
     // Auto-clear send error
     useEffect(() => {
@@ -217,7 +211,7 @@ function App() {
 
     const goBack = () => {
         setPartner(null); setChatId(null); setMessages([]);
-        setTab('chats'); loadChats();
+        setTab('chats');
     };
 
     const send = async () => {
