@@ -409,9 +409,7 @@ function App() {
                 <div className="auth-glow1" /><div className="auth-glow2" />
 
                 <div className="auth-hero">
-                    <div className="auth-logo-big">
-                        <img src="/nss-icon.png" alt="NSS" />
-                    </div>
+                    <img className="auth-logo-img" src="/nss-icon.png" alt="NSS" />
                     <div className="auth-title-stack">
                         <span className="auth-title-line">НЕ</span>
                         <span className="auth-title-line">СУЩИЙ</span>
