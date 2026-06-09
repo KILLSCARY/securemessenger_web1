@@ -432,24 +432,6 @@ function App() {
                     {authErr && <p className="auth-err">{authErr}</p>}
                     <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
                 </div>
-
-                <div className="auth-features">
-                    <div className="auth-feat">
-                        <span className="auth-feat-ico">👥</span>
-                        <span className="auth-feat-title">Сообщество</span>
-                        <span className="auth-feat-desc">Единомышленники рядом</span>
-                    </div>
-                    <div className="auth-feat">
-                        <span className="auth-feat-ico">📚</span>
-                        <span className="auth-feat-title">Знания</span>
-                        <span className="auth-feat-desc">Курсы и материалы для роста</span>
-                    </div>
-                    <div className="auth-feat">
-                        <span className="auth-feat-ico">💬</span>
-                        <span className="auth-feat-title">Общение</span>
-                        <span className="auth-feat-desc">Диалоги без поверхностности</span>
-                    </div>
-                </div>
             </div>
         </div>
     );
