@@ -80,38 +80,22 @@ input  { font-family: inherit; }
 .auth-glow1 { display: none; }
 .auth-glow2 { display: none; }
 
-/* Logo hero — full width, gold glow, fade bottom */
+/* Logo hero — transparent PNG, gold glow */
 .auth-hero {
     width: calc(100% + 40px);
     margin-left: -20px;
     position: relative;
     line-height: 0;
+    /* radial glow behind the crystal */
+    background: radial-gradient(ellipse 70% 60% at 35% 55%, rgba(234,179,8,0.18) 0%, transparent 70%);
 }
 .auth-banner-img {
     width: 100%;
     display: block;
-    filter: drop-shadow(0 0 24px rgba(245,197,24,0.55))
-            drop-shadow(0 0 60px rgba(245,197,24,0.25));
+    filter: drop-shadow(0 0 20px rgba(234,179,8,0.7))
+            drop-shadow(0 0 50px rgba(234,179,8,0.3));
 }
-.auth-hero-fade {
-    position: absolute;
-    bottom: 0; left: 0; right: 0; height: 40%;
-    background: linear-gradient(to bottom, transparent, var(--bg));
-    pointer-events: none;
-}
-
-/* Title block */
-.auth-title-block {
-    width: 100%;
-    padding: 0 4px;
-    margin-top: -20px;
-    margin-bottom: 20px;
-}
-.auth-brand {
-    font-size: 26px; font-weight: 900; color: var(--text);
-    letter-spacing: 0; margin-bottom: 4px; line-height: 1.2;
-}
-.auth-sub { color: var(--sub); font-size: 14px; }
+.auth-sub { color: var(--sub); font-size: 14px; text-align: center; width: 100%; }
 .auth-box {
     width: 100%;
     background: var(--card);
