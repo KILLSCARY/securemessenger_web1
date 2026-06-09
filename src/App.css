@@ -310,6 +310,33 @@ input  { font-family: inherit; }
 .settings-lbl { flex: 1; font-size: 15px; font-weight: 600; }
 .settings-danger .settings-lbl { color: var(--danger); }
 
+/* ── Partner profile overlay ────────────────────────────────────── */
+.profile-overlay {
+    position: absolute; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.6);
+    display: flex; align-items: flex-end;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.profile-sheet {
+    width: 100%;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+    border-radius: 28px 28px 0 0;
+    padding: 24px 24px calc(32px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px;
+}
+.profile-sheet-ava { margin-bottom: 8px; }
+.profile-sheet-name { font-size: 22px; font-weight: 900; }
+.profile-sheet-sub { font-size: 14px; color: var(--sub); }
+.profile-sheet-status { font-size: 13px; color: var(--success); margin-top: 4px; }
+.chat-header-ava-btn { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.send-err {
+    text-align: center; font-size: 12px; color: var(--danger);
+    padding: 4px 16px; background: rgba(255,92,122,0.1);
+}
+
 /* ── Chat screen ────────────────────────────────────────────────── */
 .chat-screen {
     position: absolute;

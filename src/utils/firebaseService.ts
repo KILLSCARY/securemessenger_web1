@@ -118,7 +118,10 @@ export const getUserProfile = async (userId) => {
         const q = query(collection(db, 'users'), where('userId', '==', userId), limit(1));
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
-        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        const profileData = snapshot.docs[0].data();
+        // Silently migrate to canonical path so future lookups are fast
+        setDoc(doc(db, 'users', userId), profileData, { merge: true }).catch(() => {});
+        return { id: snapshot.docs[0].id, ...profileData };
     } catch (error) {
         console.error('Error getting profile:', error);
         return null;
@@ -127,7 +130,8 @@ export const getUserProfile = async (userId) => {
 
 export const updateUserProfile = async (userId, updates) => {
     try {
-        await setDoc(doc(db, 'users', userId), updates, { merge: true });
+        // Always include userId so the online-users deduplication keeps this entry
+        await setDoc(doc(db, 'users', userId), { userId, ...updates }, { merge: true });
     } catch (error) {
         console.error('Error updating profile:', error);
     }
@@ -162,111 +166,88 @@ const loadCrypto = async () => {
 };
 
 export const saveMessage = async (chatId, message, sessionKey) => {
-    try {
-        const crypto = await loadCrypto();
-        const key = await crypto.importKey(sessionKey);
-        
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const encrypted = await crypto.encryptMessage(message.text, key);
-        
-        const messageDoc: any = {
-            senderId: message.senderId,
-            senderName: message.senderName,
-            encryptedText: encrypted.ciphertext,
-            iv: encrypted.iv,
-            timestamp: serverTimestamp(),
-            reactions: [],
-            readBy: [message.senderId]
-        };
+    const mod = await loadCrypto();
+    const key = await mod.importKey(sessionKey);
+    const encrypted = await mod.encryptMessage(message.text || '', key);
 
-        // Preserve file metadata so file messages display correctly
-        if (message.fileUrl) messageDoc.fileUrl = message.fileUrl;
-        if (message.fileType) messageDoc.fileType = message.fileType;
-        
-        await addDoc(messagesRef, messageDoc);
+    const messageDoc: any = {
+        senderId: message.senderId,
+        senderName: message.senderName,
+        encryptedText: encrypted.ciphertext,
+        iv: encrypted.iv,
+        timestamp: serverTimestamp(),
+        reactions: [],
+        readBy: [message.senderId]
+    };
+    if (message.fileUrl) messageDoc.fileUrl = message.fileUrl;
+    if (message.fileType) messageDoc.fileType = message.fileType;
 
-        // setDoc with merge works for both new (group) and existing (direct) chats
-        const chatRef = doc(db, 'chats', chatId);
-        await setDoc(chatRef, {
-            lastMessage: (message.fileUrl ? `[Файл] ${message.text?.replace('[File] ', '') || 'вложение'}` : message.text || '').substring(0, 50),
-            lastMessageTime: serverTimestamp()
-        }, { merge: true });
-    } catch (error) {
-        console.error('Error saving message:', error);
-    }
+    await addDoc(collection(db, 'chats', chatId, 'messages'), messageDoc);
+
+    await setDoc(doc(db, 'chats', chatId), {
+        lastMessage: (message.fileUrl ? '[Файл]' : (message.text || '')).substring(0, 50),
+        lastMessageTime: serverTimestamp()
+    }, { merge: true });
 };
 
-export const subscribeToMessages = (chatId, sessionKey, callback) => {
-    if (!chatId) {
-        callback([]);
-        return () => {};
-    }
-    
-    let key = null;
-    let decrypt: any = null;
-    
-    (async () => {
-        try {
-            const crypto = await loadCrypto();
-            key = await crypto.importKey(sessionKey);
-            decrypt = crypto.decryptMessage;
-        } catch (e) {
-            console.error('Key import error:', e);
-        }
-    })();
-    
-    try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const q = query(messagesRef, orderBy('timestamp', 'asc'));
-        
-        return onSnapshot(q, async (snapshot) => {
-            if (!key || !decrypt) {
-                try {
-                    const crypto = await loadCrypto();
-                    key = await crypto.importKey(sessionKey);
-                    decrypt = crypto.decryptMessage;
-                } catch (e) {
-                    console.error('Key import error:', e);
-                    callback([]);
-                    return;
-                }
-            }
-            
-            const messages = [];
-            for (const docSnap of snapshot.docs) {
-                const data = docSnap.data();
-                let text = '[Encrypted]';
-                try {
-                    const decrypted = await decrypt({ ciphertext: data.encryptedText, iv: data.iv }, key);
-                    if (decrypted !== null && decrypted !== undefined && decrypted !== '') {
-                        text = decrypted;
-                    }
-                } catch (e) {
-                    console.error('Decrypt error:', e);
-                }
+export const subscribeToMessages = (chatId: string, sessionKey: string, callback: (msgs: any[]) => void) => {
+    if (!chatId || !sessionKey) { callback([]); return () => {}; }
 
-                messages.push({
-                    id: docSnap.id,
-                    senderId: data.senderId,
-                    senderName: data.senderName,
-                    text,
-                    fileUrl: data.fileUrl || null,
-                    fileType: data.fileType || null,
-                    timestamp: data.timestamp?.toDate(),
-                    reactions: data.reactions || [],
-                    readBy: data.readBy || []
-                });
-            }
-            callback(messages);
-        }, (error) => {
-            console.error('Subscribe error:', error);
-            callback([]);
-        });
-    } catch (error) {
-        console.error('Firebase error:', error);
-        callback([]);
-        return () => {};
-    }
+    let unsubFn: (() => void) | null = null;
+    let mounted = true;
+
+    const init = async () => {
+        try {
+            const mod = await loadCrypto();
+            const key = await mod.importKey(sessionKey);
+            if (!mounted) return;
+
+            const q = query(
+                collection(db, 'chats', chatId, 'messages'),
+                orderBy('timestamp', 'asc')
+            );
+
+            unsubFn = onSnapshot(q, async (snapshot) => {
+                if (!mounted) return;
+                const msgs: any[] = [];
+                for (const docSnap of snapshot.docs) {
+                    const data = docSnap.data();
+                    let text = '';
+                    try {
+                        const dec = await mod.decryptMessage(
+                            { ciphertext: data.encryptedText, iv: data.iv }, key
+                        );
+                        text = dec ?? '';
+                    } catch { text = '[Encrypted]'; }
+                    msgs.push({
+                        id: docSnap.id,
+                        senderId: data.senderId,
+                        senderName: data.senderName,
+                        text,
+                        fileUrl: data.fileUrl ?? null,
+                        fileType: data.fileType ?? null,
+                        timestamp: data.timestamp?.toDate(),
+                        reactions: data.reactions ?? [],
+                        readBy: data.readBy ?? [],
+                    });
+                }
+                if (mounted) callback(msgs);
+            }, (err) => {
+                console.error('Messages subscription error:', err);
+                if (mounted) callback([]);
+            });
+        } catch (err) {
+            console.error('subscribeToMessages init error:', err);
+            if (mounted) callback([]);
+        }
+    };
+
+    init();
+
+    return () => {
+        mounted = false;
+        unsubFn?.();
+    };
 };
 
 export const addReaction = async (chatId, messageId, userId, emoji) => {

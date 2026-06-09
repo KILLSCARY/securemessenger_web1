@@ -100,6 +100,8 @@ function App() {
     const [showEmoji, setShowEmoji] = useState(false);
     const [reactionFor, setReactionFor] = useState<string | null>(null);
     const [cityOpen, setCityOpen] = useState(true);
+    const [viewPartner, setViewPartner] = useState(false);
+    const [sendErr, setSendErr] = useState('');
 
     const fileRef = useRef<any>(null);
     const avaRef = useRef<any>(null);
@@ -210,22 +212,28 @@ function App() {
 
     const send = async () => {
         if ((!input.trim() && !selFile) || !chatId || !sessionKey) return;
-        await setTypingStatus(chatId, user.uid, false);
-        if (selFile) {
-            await saveMessage(chatId, {
-                id: generateMessageId(), text: `[File] ${selFile.name}`,
-                senderId: user.uid, senderName: profile?.username || user.email,
-                fileUrl: selFile.url, fileType: selFile.type,
-            }, sessionKey);
-            setSelFile(null);
+        setSendErr('');
+        try {
+            await setTypingStatus(chatId, user.uid, false);
+            if (selFile) {
+                await saveMessage(chatId, {
+                    id: generateMessageId(), text: `[File] ${selFile.name}`,
+                    senderId: user.uid, senderName: profile?.username || user.email,
+                    fileUrl: selFile.url, fileType: selFile.type,
+                }, sessionKey);
+                setSelFile(null);
+            }
+            if (input.trim()) {
+                await saveMessage(chatId, {
+                    id: generateMessageId(), text: input,
+                    senderId: user.uid, senderName: profile?.username || user.email,
+                }, sessionKey);
+            }
+            setInput('');
+        } catch (e: any) {
+            setSendErr('Ошибка отправки');
+            console.error('Send error:', e);
         }
-        if (input.trim()) {
-            await saveMessage(chatId, {
-                id: generateMessageId(), text: input,
-                senderId: user.uid, senderName: profile?.username || user.email,
-            }, sessionKey);
-        }
-        setInput('');
     };
 
     const handleTyping = useCallback(async (v: string) => {
@@ -295,12 +303,30 @@ function App() {
             <div className="chat-screen">
                 <div className="chat-header">
                     <button className="icon-btn" onClick={goBack}><IcoBack /></button>
-                    <Ava src={partner.avatar} name={partner.username} size={40} />
-                    <div className="chat-header-info">
+                    <div className="chat-header-ava-btn" onClick={() => setViewPartner(true)}>
+                        <Ava src={partner.avatar} name={partner.username} size={40} />
+                    </div>
+                    <div className="chat-header-info" onClick={() => setViewPartner(true)} style={{ cursor: 'pointer' }}>
                         <div className="chat-header-name">{partner.username}</div>
                         <div className="chat-header-status">{typing.length > 0 ? 'печатает...' : 'онлайн'}</div>
                     </div>
                 </div>
+
+                {viewPartner && (
+                    <div className="profile-overlay" onClick={() => setViewPartner(false)}>
+                        <div className="profile-sheet" onClick={e => e.stopPropagation()}>
+                            <div className="profile-sheet-ava">
+                                <Ava src={partner.avatar} name={partner.username} size={88} />
+                            </div>
+                            <div className="profile-sheet-name">{partner.username}</div>
+                            <div className="profile-sheet-sub">@{(partner.username || 'user').toLowerCase().replace(/\s/g, '')}</div>
+                            <div className="profile-sheet-status">● онлайн</div>
+                            <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setViewPartner(false)}>
+                                Написать
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="msgs-area">
                     {messages.map(msg => (
@@ -343,6 +369,8 @@ function App() {
                         {EMOJIS.map(em => <button key={em} onClick={() => { setInput(p => p + em); setShowEmoji(false); }}>{em}</button>)}
                     </div>
                 )}
+
+                {sendErr && <div className="send-err">{sendErr}</div>}
 
                 <div className="composer">
                     <button className="composer-btn" onClick={() => fileRef.current?.click()}>📎</button>
