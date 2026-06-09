@@ -1,16 +1,16 @@
 /* ── Variables ─────────────────────────────────────────────────── */
 :root {
-    --bg:      #0A0B10;
-    --card:    #12141C;
-    --card2:   #1A1D28;
-    --border:  #222538;
-    --text:    #F1F3FF;
-    --sub:     #8C93A8;
-    --accent:  #8B5CF6;
-    --accent2: #5B8CFF;
-    --success: #34D399;
+    --bg:      #080809;
+    --card:    #111110;
+    --card2:   #181816;
+    --border:  #252520;
+    --text:    #F2EDD8;
+    --sub:     #7A7A62;
+    --accent:  #EAB308;
+    --accent2: #D97706;
+    --success: #4ade80;
     --danger:  #FF5C7A;
-    --input:   #0F1119;
+    --input:   #0D0D0A;
 }
 
 /* ── Reset ─────────────────────────────────────────────────────── */
@@ -79,12 +79,12 @@ input  { font-family: inherit; }
 .auth-glow1 {
     position: absolute; top: 60px; left: -60px;
     width: 280px; height: 280px; border-radius: 50%;
-    background: rgba(139,92,246,.15); filter: blur(70px); pointer-events: none;
+    background: rgba(234,179,8,.18); filter: blur(80px); pointer-events: none;
 }
 .auth-glow2 {
     position: absolute; bottom: 80px; right: -60px;
     width: 260px; height: 260px; border-radius: 50%;
-    background: rgba(91,140,255,.12); filter: blur(70px); pointer-events: none;
+    background: rgba(217,119,6,.12); filter: blur(70px); pointer-events: none;
 }
 .auth-top { text-align: center; margin-bottom: 36px; }
 .auth-brand { font-size: 38px; font-weight: 900; letter-spacing: 2px; margin: 14px 0 6px; }
@@ -101,7 +101,7 @@ input  { font-family: inherit; }
     flex: 1; padding: 11px; border-radius: 11px;
     color: var(--sub); font-size: 14px; font-weight: 700; transition: all .2s;
 }
-.auth-tab.active { background: var(--accent); color: #fff; }
+.auth-tab.active { background: var(--accent); color: #000; }
 .nss-input {
     width: 100%; padding: 15px 16px; margin-bottom: 12px;
     background: var(--input); border: 1.5px solid var(--border);
@@ -113,29 +113,34 @@ input  { font-family: inherit; }
 .auth-err { color: var(--danger); font-size: 13px; margin-bottom: 10px; }
 .btn-primary {
     width: 100%; padding: 16px;
-    background: var(--accent); color: #fff;
+    background: var(--accent); color: #000;
     font-size: 16px; font-weight: 800; border-radius: 18px;
     transition: opacity .2s; margin-top: 4px;
 }
 .btn-primary:active { opacity: .8; }
 
 /* ── Avatar ────────────────────────────────────────────────────── */
+.ava-wrap {
+    position: relative;
+    flex-shrink: 0;
+    display: inline-flex;
+}
 .ava {
     border-radius: 50%;
     overflow: hidden;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    position: relative;
 }
 .ava img {
     width: 100%; height: 100%;
     object-fit: cover; display: block;
 }
 .ava span { color: #fff; font-weight: 800; line-height: 1; }
+/* Online dot lives OUTSIDE .ava (overflow:hidden) so it's never clipped */
 .ava-online {
-    position: absolute; right: 1px; bottom: 1px;
+    position: absolute; right: -1px; bottom: -1px;
     width: 13px; height: 13px; border-radius: 50%;
-    background: var(--success); border: 2px solid var(--bg);
+    background: var(--success); border: 2.5px solid var(--bg);
+    pointer-events: none;
 }
 .city-ava { border-radius: 14px !important; }
 
@@ -160,7 +165,8 @@ input  { font-family: inherit; }
 .nav-btn.nav-active { background: var(--accent); }
 .nav-ico { font-size: 22px; line-height: 1; }
 .nav-lbl { font-size: 10px; font-weight: 700; }
-.nav-btn.nav-active .nav-lbl { color: #fff; }
+.nav-btn.nav-active .nav-lbl { color: #000; }
+.nav-btn.nav-active .nav-ico { filter: brightness(0); }
 
 /* ── Main content wrapper ──────────────────────────────────────── */
 .main-wrap {
@@ -234,7 +240,7 @@ input  { font-family: inherit; }
 .chat-preview { font-size: 13px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .chat-time { font-size: 12px; color: var(--sub); flex-shrink: 0; }
 .unread {
-    background: var(--accent); color: #fff; font-size: 11px; font-weight: 800;
+    background: var(--accent); color: #000; font-size: 11px; font-weight: 800;
     min-width: 20px; height: 20px; border-radius: 10px;
     display: flex; align-items: center; justify-content: center; padding: 0 5px; flex-shrink: 0;
 }
@@ -272,7 +278,7 @@ input  { font-family: inherit; }
 }
 .profile-glow {
     position: absolute; top: 0; width: 260px; height: 200px; border-radius: 50%;
-    background: rgba(139,92,246,.14); filter: blur(60px); pointer-events: none;
+    background: rgba(234,179,8,.14); filter: blur(60px); pointer-events: none;
 }
 .profile-ava-btn { position: relative; cursor: pointer; }
 .ava-edit-badge {
@@ -390,7 +396,10 @@ input  { font-family: inherit; }
 .bubble-me   { background: var(--accent); border-bottom-right-radius: 6px; }
 .bubble-them { background: var(--card2); border: 1px solid var(--border); border-bottom-left-radius: 6px; }
 .bubble-text { font-size: 15px; line-height: 1.45; color: var(--text); }
+.bubble-me .bubble-text { color: #000; }
 .bubble-time { display: block; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 4px; text-align: right; }
+.bubble-me .bubble-time { color: rgba(0,0,0,.5); }
+.bubble-me .msg-file-chip { background: rgba(0,0,0,.12); color: #000; }
 .msg-img { max-width: 200px; border-radius: 12px; display: block; margin-bottom: 4px; }
 .msg-file-chip {
     background: rgba(255,255,255,.1); border-radius: 8px;

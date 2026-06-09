@@ -51,13 +51,15 @@ const COURSES = [
 ];
 
 // ── Avatar ────────────────────────────────────────────────────────
-function Ava({ src = '', name = '?', size = 48, online = false, color = '#8B5CF6' }: {
+function Ava({ src = '', name = '?', size = 48, online = false, color = '#EAB308' }: {
     src?: string | null; name?: string; size?: number; online?: boolean; color?: string;
 }) {
     const letter = (name || '?')[0]?.toUpperCase() || '?';
     return (
-        <div className="ava" style={{ width: size, height: size, minWidth: size, background: color }}>
-            {src ? <img src={src} alt={name} /> : <span style={{ fontSize: size * 0.37 }}>{letter}</span>}
+        <div className="ava-wrap" style={{ width: size, height: size }}>
+            <div className="ava" style={{ width: size, height: size, background: color }}>
+                {src ? <img src={src} alt={name} /> : <span style={{ fontSize: size * 0.37 }}>{letter}</span>}
+            </div>
             {online && <div className="ava-online" />}
         </div>
     );
@@ -68,10 +70,10 @@ function IcoBack() {
     return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M15 6L9 12L15 18" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 function IcoSend() {
-    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="#fff" strokeWidth="2" strokeLinecap="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="#000" strokeWidth="2" strokeLinecap="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 function IcoArrow() {
-    return <svg width={16} height={16} viewBox="0 0 24 24" fill="none"><path d="M9 6L15 12L9 18" stroke="#8C93A8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    return <svg width={16} height={16} viewBox="0 0 24 24" fill="none"><path d="M9 6L15 12L9 18" stroke="#7A7A62" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
 // ── App ───────────────────────────────────────────────────────────
