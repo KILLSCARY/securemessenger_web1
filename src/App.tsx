@@ -278,7 +278,7 @@ function App() {
     if (loading) return (
         <div className="app">
             <div className="loading-screen">
-                <div className="logo-circle"><span>N</span></div>
+                <div className="logo-circle"><img src="/nss-icon.png" alt="NSS" /></div>
                 <div className="spinner" />
             </div>
         </div>
@@ -290,8 +290,8 @@ function App() {
             <div className="auth-wrap">
                 <div className="auth-glow1" /><div className="auth-glow2" />
                 <div className="auth-top">
-                    <div className="logo-circle"><span>N</span></div>
-                    <h1 className="auth-brand">NSS</h1>
+                    <div className="logo-circle"><img src="/nss-icon.png" alt="NSS" /></div>
+                    <h1 className="auth-brand">Не Сущий Свет</h1>
                     <p className="auth-sub">Клуб. Курсы. Общение.</p>
                 </div>
                 <div className="auth-box">
