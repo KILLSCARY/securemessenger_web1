@@ -440,11 +440,22 @@ function App() {
                     <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
                 </div>
 
-                <div className="auth-nav-preview">
-                    <div className="auth-nav-item"><span>💬</span><span>Чаты</span></div>
-                    <div className="auth-nav-item"><span>📚</span><span>Курсы</span></div>
-                    <div className="auth-nav-item"><span>🔔</span><span>Лента</span></div>
-                    <div className="auth-nav-item"><span>👤</span><span>Профиль</span></div>
+                <div className="auth-features">
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">👥</span>
+                        <span className="auth-feat-title">Сообщество</span>
+                        <span className="auth-feat-desc">Единомышленники рядом</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">📚</span>
+                        <span className="auth-feat-title">Знания</span>
+                        <span className="auth-feat-desc">Курсы и материалы для роста</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">💬</span>
+                        <span className="auth-feat-title">Общение</span>
+                        <span className="auth-feat-desc">Диалоги без поверхностности</span>
+                    </div>
                 </div>
             </div>
         </div>
