@@ -7,7 +7,6 @@ import {
     onSnapshot,
     doc,
     updateDoc,
-    deleteDoc,
     serverTimestamp,
     getDocs,
     getDoc,
@@ -20,72 +19,34 @@ import {
     getDownloadURL 
 } from 'firebase/storage';
 import { db, storage } from '../firebase';
+import CryptoJS from 'crypto-js';
 
-const chatKeys = new Map();
-
-const getOrCreateChatKey = async (chatId, userId) => {
-    const keyName = `chat_key_${chatId}_${userId}`;
-    
-    let keyData = sessionStorage.getItem(keyName);
-    if (keyData) {
-        return JSON.parse(keyData);
-    }
-    
-    const { encryptMessage, decryptMessage, generateSessionKey, importKey, exportKey } = await import('./crypto');
-    
-    const newKey = generateSessionKey();
-    const exported = newKey;
-    
-    keyData = { key: exported, createdAt: Date.now() };
-    sessionStorage.setItem(keyName, JSON.stringify(keyData));
-    
-    const chatKeyRef = doc(db, 'chatKeys', chatId);
-    const existing = await getDoc(chatKeyRef);
-    
-    if (!existing.exists()) {
-        await setDoc(chatKeyRef, {
-            chatId,
-            participants: {}
-        });
-    }
-    
-    return keyData;
+// Synchronous AES-256-CBC helpers — no async/Web Crypto dependency
+const encryptText = (text: string, keyHex: string) => {
+    const key = CryptoJS.enc.Hex.parse(keyHex);
+    const iv  = CryptoJS.lib.WordArray.random(16);
+    const enc = CryptoJS.AES.encrypt(text, key, {
+        iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7
+    });
+    return {
+        ciphertext: enc.ciphertext.toString(CryptoJS.enc.Base64),
+        iv: iv.toString(CryptoJS.enc.Hex),
+    };
 };
 
-const getChatKey = async (chatId, userId) => {
-    const keyName = `chat_key_${chatId}_${userId}`;
-    const keyData = sessionStorage.getItem(keyName);
-    if (keyData) {
-        return JSON.parse(keyData).key;
-    }
-    return null;
-};
-
-const saveChatKeyToFirestore = async (chatId, userId, publicKey) => {
-    const chatKeyRef = doc(db, 'chatKeys', chatId);
-    await setDoc(chatKeyRef, {
-        participants: {
-            [userId]: {
-                publicKey,
-                joinedAt: Date.now()
-            }
-        }
-    }, { merge: true });
-};
-
-export const getParticipantPublicKeys = async (chatId) => {
+const decryptText = (ciphertext: string, ivHex: string, keyHex: string): string => {
     try {
-        const chatKeyRef = doc(db, 'chatKeys', chatId);
-        const snapshot = await getDoc(chatKeyRef);
-        if (snapshot.exists()) {
-            return snapshot.data().participants || {};
-        }
-        return {};
-    } catch (error) {
-        console.error('Error getting participant keys:', error);
-        return {};
-    }
+        const key = CryptoJS.enc.Hex.parse(keyHex);
+        const iv  = CryptoJS.enc.Hex.parse(ivHex);
+        const ct  = CryptoJS.enc.Base64.parse(ciphertext);
+        const dec = CryptoJS.AES.decrypt(
+            CryptoJS.lib.CipherParams.create({ ciphertext: ct }),
+            key, { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+        );
+        return dec.toString(CryptoJS.enc.Utf8) || '';
+    } catch { return ''; }
 };
+
 
 export const createUserProfile = async (userId, username, email) => {
     try {
@@ -156,19 +117,9 @@ export const getOnlineUsers = async () => {
     }
 };
 
-let cryptoModule: any = null;
-
-const loadCrypto = async () => {
-    if (!cryptoModule) {
-        cryptoModule = await import('./crypto');
-    }
-    return cryptoModule;
-};
 
 export const saveMessage = async (chatId, message, sessionKey) => {
-    const mod = await loadCrypto();
-    const key = await mod.importKey(sessionKey);
-    const encrypted = await mod.encryptMessage(message.text || '', key);
+    const encrypted = encryptText(message.text || '', sessionKey);
 
     const messageDoc: any = {
         senderId: message.senderId,
@@ -193,61 +144,33 @@ export const saveMessage = async (chatId, message, sessionKey) => {
 export const subscribeToMessages = (chatId: string, sessionKey: string, callback: (msgs: any[]) => void) => {
     if (!chatId || !sessionKey) { callback([]); return () => {}; }
 
-    let unsubFn: (() => void) | null = null;
-    let mounted = true;
+    const q = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('timestamp', 'asc')
+    );
 
-    const init = async () => {
-        try {
-            const mod = await loadCrypto();
-            const key = await mod.importKey(sessionKey);
-            if (!mounted) return;
-
-            const q = query(
-                collection(db, 'chats', chatId, 'messages'),
-                orderBy('timestamp', 'asc')
-            );
-
-            unsubFn = onSnapshot(q, async (snapshot) => {
-                if (!mounted) return;
-                const msgs: any[] = [];
-                for (const docSnap of snapshot.docs) {
-                    const data = docSnap.data();
-                    let text = '';
-                    try {
-                        const dec = await mod.decryptMessage(
-                            { ciphertext: data.encryptedText, iv: data.iv }, key
-                        );
-                        text = dec ?? '';
-                    } catch { text = '[Encrypted]'; }
-                    msgs.push({
-                        id: docSnap.id,
-                        senderId: data.senderId,
-                        senderName: data.senderName,
-                        text,
-                        fileUrl: data.fileUrl ?? null,
-                        fileType: data.fileType ?? null,
-                        timestamp: data.timestamp?.toDate(),
-                        reactions: data.reactions ?? [],
-                        readBy: data.readBy ?? [],
-                    });
-                }
-                if (mounted) callback(msgs);
-            }, (err) => {
-                console.error('Messages subscription error:', err);
-                if (mounted) callback([]);
+    return onSnapshot(q, (snapshot) => {
+        const msgs: any[] = [];
+        for (const docSnap of snapshot.docs) {
+            const data = docSnap.data();
+            const text = decryptText(data.encryptedText || '', data.iv || '', sessionKey);
+            msgs.push({
+                id: docSnap.id,
+                senderId: data.senderId,
+                senderName: data.senderName,
+                text,
+                fileUrl: data.fileUrl ?? null,
+                fileType: data.fileType ?? null,
+                timestamp: data.timestamp?.toDate(),
+                reactions: data.reactions ?? [],
+                readBy: data.readBy ?? [],
             });
-        } catch (err) {
-            console.error('subscribeToMessages init error:', err);
-            if (mounted) callback([]);
         }
-    };
-
-    init();
-
-    return () => {
-        mounted = false;
-        unsubFn?.();
-    };
+        callback(msgs);
+    }, (err) => {
+        console.error('Messages subscription error:', err);
+        callback([]);
+    });
 };
 
 export const addReaction = async (chatId, messageId, userId, emoji) => {
