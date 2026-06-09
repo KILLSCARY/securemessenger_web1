@@ -1,1007 +1,541 @@
 import { useState, useEffect, useRef, useCallback, Component } from 'react';
-import { 
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged,
-    updateProfile
+import {
+    createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    signOut, onAuthStateChanged, updateProfile
 } from 'firebase/auth';
 import { auth } from './firebase';
+import { generateMessageId } from './utils/crypto';
 import {
-    generateMessageId
-} from './utils/crypto';
-import {
-    createUserProfile,
-    getUserProfile,
-    updateUserProfile,
-    subscribeToMessages,
-    saveMessage,
-    addReaction,
-    uploadAvatar,
-    uploadStatus,
-    getChatSessionKey,
-    setTypingStatus,
-    subscribeToTyping,
-    getUserChats,
-    createChat,
-    getOnlineUsers,
-    uploadFile,
-    getStatuses
+    createUserProfile, getUserProfile, updateUserProfile,
+    subscribeToMessages, saveMessage, addReaction,
+    uploadAvatar, getChatSessionKey, setTypingStatus,
+    subscribeToTyping, getUserChats, createChat,
+    getOnlineUsers, uploadFile, getStatuses, uploadStatus
 } from './utils/firebaseService';
 import './App.css';
 
-class ErrorBoundary extends Component {
-    constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-    }
-    static getDerivedStateFromError(error) {
-        return { hasError: true, error };
-    }
-    componentDidCatch(error, errorInfo) {
-        console.error('React Error:', error, errorInfo);
-    }
+// ── Error Boundary ────────────────────────────────────────────────
+class ErrorBoundary extends Component<any, any> {
+    state = { hasError: false, error: null };
+    static getDerivedStateFromError(e: any) { return { hasError: true, error: e }; }
     render() {
-        if (this.state.hasError) {
-            return (
-                <div style={{ 
-                    padding: 20, 
-                    color: 'white', 
-                    background: '#0A0B10', 
-                    height: '100%',
-                    fontFamily: 'sans-serif'
-                }}>
-                    <h1 style={{color: '#FF5C7A'}}>Something went wrong</h1>
-                    <pre style={{background: 'rgba(255,255,255,0.1)', padding: 10, borderRadius: 8}}>
-                        {this.state.error?.message || this.state.error?.toString() || 'Unknown error'}
-                    </pre>
-                </div>
-            );
-        }
+        if (this.state.hasError) return (
+            <div style={{ padding: 24, color: '#fff', background: '#0A0B10', height: '100dvh' }}>
+                <h2 style={{ color: '#FF5C7A', marginBottom: 12 }}>Ошибка приложения</h2>
+                <pre style={{ fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
+                    {(this.state.error as any)?.message || String(this.state.error)}
+                </pre>
+            </div>
+        );
         return this.props.children;
     }
 }
 
+// ── Constants ─────────────────────────────────────────────────────
 const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
-const EMOJIS = ['😀', '😂', '😍', '🥰', '😎', '🤔', '😅', '😭', '😤', '🥳', '😴', '🤯', '👍', '👎', '👋', '🙏', '💪', '🎉', '🔥', '❤️', '💔', '✨', '🌟', '💯'];
+const EMOJIS = ['😀','😂','😍','🥰','😎','🤔','😅','😭','😤','🥳','😴','🤯','👍','👎','👋','🙏','💪','🎉','🔥','❤️','💔','✨','🌟','💯'];
+const CITY_CHATS = [
+    { id: 'city_moscow', name: 'Москва', short: 'МСК', color: '#8B5CF6' },
+    { id: 'city_spb', name: 'Санкт-Петербург', short: 'СПБ', color: '#3B82F6' },
+    { id: 'city_novosibirsk', name: 'Новосибирск', short: 'НСБ', color: '#10B981' },
+    { id: 'city_yekaterinburg', name: 'Екатеринбург', short: 'ЕКБ', color: '#F59E0B' },
+    { id: 'city_kazan', name: 'Казань', short: 'КЗН', color: '#EF4444' },
+    { id: 'city_krasnodar', name: 'Краснодар', short: 'КРД', color: '#EC4899' },
+];
+const COURSES = [
+    { title: 'Продажи с нуля', lessons: 24, icon: '🎯', color: '#8B5CF6', desc: 'Скрипты, возражения, закрытие сделок' },
+    { title: 'Построение команды', lessons: 18, icon: '👥', color: '#3B82F6', desc: 'Найм, адаптация, управление отделом' },
+    { title: 'Личный бренд', lessons: 12, icon: '⭐', color: '#F59E0B', desc: 'Стать экспертом в своей нише' },
+    { title: 'Финансы бизнеса', lessons: 15, icon: '💰', color: '#10B981', desc: 'Планирование и масштабирование' },
+    { title: 'Переговоры', lessons: 20, icon: '🤝', color: '#EF4444', desc: 'Психология и техники влияния' },
+];
 
-function IconChat({ color = '#fff', size = 22 }) {
+// ── Avatar ────────────────────────────────────────────────────────
+function Ava({ src = '', name = '?', size = 48, online = false, color = '#8B5CF6' }: {
+    src?: string | null; name?: string; size?: number; online?: boolean; color?: string;
+}) {
+    const letter = (name || '?')[0]?.toUpperCase() || '?';
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M8 18H5L6.2 15.6C5.45 14.69 5 13.53 5 12.25C5 8.8 8.13 6 12 6C15.87 6 19 8.8 19 12.25C19 15.7 15.87 18.5 12 18.5C10.64 18.5 9.38 18.15 8.3 17.55L8 18Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <div className="ava" style={{ width: size, height: size, minWidth: size, background: color }}>
+            {src ? <img src={src} alt={name} /> : <span style={{ fontSize: size * 0.37 }}>{letter}</span>}
+            {online && <div className="ava-online" />}
+        </div>
     );
 }
 
-function IconCall({ color = '#fff', size = 22 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M6.9 4.5L9.3 4.2C9.72 4.15 10.12 4.39 10.28 4.78L11.38 7.41C11.52 7.75 11.43 8.15 11.15 8.39L9.76 9.58C10.68 11.45 12.2 12.97 14.07 13.89L15.26 12.5C15.5 12.22 15.9 12.13 16.24 12.27L18.87 13.37C19.26 13.53 19.5 13.93 19.45 14.35L19.15 16.75C19.08 17.31 18.61 17.73 18.05 17.73C10.95 17.73 5.92 12.7 5.92 5.6C5.92 5.04 6.34 4.57 6.9 4.5Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-    );
+// ── Icons ─────────────────────────────────────────────────────────
+function IcoBack() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M15 6L9 12L15 18" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IcoSend() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="#fff" strokeWidth="2" strokeLinecap="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IcoArrow() {
+    return <svg width={16} height={16} viewBox="0 0 24 24" fill="none"><path d="M9 6L15 12L9 18" stroke="#8C93A8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
-function IconUser({ color = '#fff', size = 22 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="8" r="3.5" stroke={color} strokeWidth="1.8"/>
-            <path d="M5.5 18.5C6.9 15.95 9.16 14.8 12 14.8C14.84 14.8 17.1 15.95 18.5 18.5" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
-        </svg>
-    );
-}
-
-function IconArrow({ color = '#fff', size = 18 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M9 6L15 12L9 18" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-    );
-}
-
-function IconSend({ color = '#fff', size = 20 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M21 3L10 14" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M21 3L14 21L10 14L3 10L21 3Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-    );
-}
-
+// ── App ───────────────────────────────────────────────────────────
 function App() {
-    const [user, setUser] = useState(null);
-    const [userProfile, setUserProfile] = useState(null);
+    const [user, setUser] = useState<any>(null);
+    const [profile, setProfile] = useState<any>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [username, setUsername] = useState('');
+    const [uname, setUname] = useState('');
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const [authErr, setAuthErr] = useState('');
 
-    const [messages, setMessages] = useState([]);
+    const [messages, setMessages] = useState<any[]>([]);
     const [input, setInput] = useState('');
-    const [currentPartner, setCurrentPartner] = useState(null);
-    const [chatId, setChatId] = useState(null);
-    const [sessionKey, setSessionKey] = useState(null);
+    const [partner, setPartner] = useState<any>(null);
+    const [chatId, setChatId] = useState<string | null>(null);
+    const [sessionKey, setSessionKey] = useState<string | null>(null);
+    const [selFile, setSelFile] = useState<any>(null);
 
-    const [chats, setChats] = useState([]);
-    const [onlineUsers, setOnlineUsers] = useState([]);
-    const [typingUsers, setTypingUsers] = useState([]);
-    const [cityChatsSection, setCityChatsSection] = useState(false);
+    const [chats, setChats] = useState<any[]>([]);
+    const [online, setOnline] = useState<any[]>([]);
+    const [typing, setTyping] = useState<any[]>([]);
 
-    const [activeTab, setActiveTab] = useState('chats');
-    const [showProfile, setShowProfile] = useState(false);
-    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [showReactionPicker, setShowReactionPicker] = useState(null);
-    const [theme, setTheme] = useState('dark');
-    const [selectedFile, setSelectedFile] = useState(null);
+    const [tab, setTab] = useState('chats');
+    const [showEmoji, setShowEmoji] = useState(false);
+    const [reactionFor, setReactionFor] = useState<string | null>(null);
+    const [cityOpen, setCityOpen] = useState(true);
 
-    const fileInputRef = useRef(null);
-    const avatarInputRef = useRef(null);
-    const messagesEndRef = useRef(null);
-    const typingTimeoutRef = useRef(null);
+    const fileRef = useRef<any>(null);
+    const avaRef = useRef<any>(null);
+    const endRef = useRef<any>(null);
+    const typingTimer = useRef<any>(null);
 
+    // Auth
     useEffect(() => {
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        setTheme(savedTheme);
-        document.documentElement.setAttribute('data-theme', savedTheme);
-    }, []);
-
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                setUser(firebaseUser);
-                let profile = await getUserProfile(firebaseUser.uid);
-
-                if (!profile) {
-                    const username = sessionStorage.getItem('temp_username') || firebaseUser.email.split('@')[0];
-                    profile = await createUserProfile(firebaseUser.uid, username, firebaseUser.email);
+        const unsub = onAuthStateChanged(auth, async (fu) => {
+            if (fu) {
+                setUser(fu);
+                let p = await getUserProfile(fu.uid);
+                if (!p) {
+                    const n = sessionStorage.getItem('temp_username') || fu.email!.split('@')[0];
+                    p = await createUserProfile(fu.uid, n, fu.email!);
                     sessionStorage.removeItem('temp_username');
                 }
-
-                await updateUserProfile(firebaseUser.uid, { status: 'online' });
-                setUserProfile(profile);
+                await updateUserProfile(fu.uid, { status: 'online' });
+                setProfile(p);
             } else {
-                setUser(null);
-                setUserProfile(null);
+                setUser(null); setProfile(null);
             }
             setLoading(false);
         });
-
-        return () => unsubscribe();
+        return () => unsub();
     }, []);
 
     useEffect(() => {
-        const markOffline = () => {
-            if (user) updateUserProfile(user.uid, { status: 'offline' });
-        };
-        window.addEventListener('beforeunload', markOffline);
-        return () => window.removeEventListener('beforeunload', markOffline);
+        const off = () => user && updateUserProfile(user.uid, { status: 'offline' });
+        window.addEventListener('beforeunload', off);
+        return () => window.removeEventListener('beforeunload', off);
     }, [user]);
 
+    // Messages
     useEffect(() => {
         if (user && chatId && sessionKey) {
-            const unsubscribe = subscribeToMessages(chatId, sessionKey, setMessages);
-            return () => unsubscribe && unsubscribe();
-        } else {
-            setMessages([]);
+            const unsub = subscribeToMessages(chatId, sessionKey, setMessages);
+            return () => unsub?.();
         }
+        setMessages([]);
     }, [chatId, sessionKey, user]);
 
+    useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+    // Chats & online
     const loadChats = useCallback(async () => {
         if (!user) return;
-        const userChats = await getUserChats(user.uid);
-        setChats(userChats);
+        setChats(await getUserChats(user.uid));
     }, [user]);
 
-    const loadStatuses = useCallback(async () => {
-        await getStatuses();
-    }, []);
-
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        if (!user) return;
+        loadChats();
+        getStatuses();
+        getOnlineUsers().then((us: any[]) => setOnline(us.filter(u => u.userId !== user.uid)));
+        const iv = setInterval(async () => {
+            const us = await getOnlineUsers();
+            setOnline(us.filter((u: any) => u.userId !== user.uid));
+        }, 5000);
+        return () => clearInterval(iv);
+    }, [user, loadChats]);
 
+    // Typing
     useEffect(() => {
-        if (user) {
-            loadChats();
-            loadStatuses();
-            const interval = setInterval(async () => {
-                const users = await getOnlineUsers();
-                setOnlineUsers(users.filter(u => u.userId !== user.uid));
-            }, 5000);
-            return () => clearInterval(interval);
-        }
-    }, [user, loadChats, loadStatuses]);
-
-    useEffect(() => {
-        if (chatId && user) {
-            const unsubscribe = subscribeToTyping(chatId, user.uid, (users) => {
-                setTypingUsers(users);
-            });
-            return () => unsubscribe();
-        } else {
-            setTypingUsers([]);
-        }
+        if (!chatId || !user) { setTyping([]); return; }
+        const unsub = subscribeToTyping(chatId, user.uid, setTyping);
+        return () => unsub();
     }, [chatId, user]);
 
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError('');
+    // Actions
+    const handleAuth = async () => {
+        setAuthErr('');
         setLoading(true);
-
         try {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
-                sessionStorage.setItem('temp_username', username);
-                const result = await createUserWithEmailAndPassword(auth, email, password);
-                await updateProfile(result.user, { displayName: username });
+                sessionStorage.setItem('temp_username', uname);
+                const r = await createUserWithEmailAndPassword(auth, email, password);
+                await updateProfile(r.user, { displayName: uname });
             }
-        } catch (err) {
-            setError(err.message);
+        } catch (e: any) {
+            setAuthErr(e.message);
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleLogout = async () => {
-        if (user) {
-            await updateUserProfile(user.uid, { status: 'offline' });
-        }
+        await updateUserProfile(user.uid, { status: 'offline' });
         await signOut(auth);
-        setCurrentPartner(null);
-        setChatId(null);
-        setActiveTab('chats');
-        setMessages([]);
+        setPartner(null); setChatId(null); setMessages([]); setTab('chats');
     };
 
-    const toggleTheme = () => {
-        const newTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(newTheme);
-        localStorage.setItem('theme', newTheme);
-        document.documentElement.setAttribute('data-theme', newTheme);
-    };
-
-    const startChat = async (partnerId, partnerName, partnerAvatar = null) => {
-        // City group chats use a fixed chatId without creating a 1-on-1 chat entry
-        const isGroupChat = partnerId.startsWith('__group_');
-        const newChatId = isGroupChat ? partnerId.replace('__group_', '') : await createChat(user.uid, partnerId);
-        const key = await getChatSessionKey(newChatId, user.uid);
-        
-        setChatId(newChatId);
+    const startChat = async (pid: string, pname: string, pava: any = null) => {
+        const isGroup = pid.startsWith('__group_');
+        const cid = isGroup ? pid.replace('__group_', '') : await createChat(user.uid, pid);
+        const key = await getChatSessionKey(cid, user.uid);
+        setChatId(cid);
         setSessionKey(key);
-        setCurrentPartner({ 
-            userId: partnerId, 
-            username: partnerName,
-            avatar: partnerAvatar 
-        });
-        setActiveTab('chat');
+        setPartner({ userId: pid, username: pname, avatar: pava });
+        setTab('chat');
     };
 
-    const sendMessage = async () => {
-        if ((!input.trim() && !selectedFile) || !chatId || !sessionKey) return;
+    const goBack = () => {
+        setPartner(null); setChatId(null); setMessages([]);
+        setTab('chats'); loadChats();
+    };
 
+    const send = async () => {
+        if ((!input.trim() && !selFile) || !chatId || !sessionKey) return;
         await setTypingStatus(chatId, user.uid, false);
-
-        if (selectedFile) {
-            const message = {
-                id: generateMessageId(),
-                text: `[File] ${selectedFile.name}`,
-                senderId: user.uid,
-                senderName: userProfile?.username || user.email,
-                fileUrl: selectedFile.url,
-                fileType: selectedFile.type
-            };
-            await saveMessage(chatId, message, sessionKey);
-            setSelectedFile(null);
+        if (selFile) {
+            await saveMessage(chatId, {
+                id: generateMessageId(), text: `[File] ${selFile.name}`,
+                senderId: user.uid, senderName: profile?.username || user.email,
+                fileUrl: selFile.url, fileType: selFile.type,
+            }, sessionKey);
+            setSelFile(null);
         }
-
         if (input.trim()) {
-            const message = {
-                id: generateMessageId(),
-                text: input,
-                senderId: user.uid,
-                senderName: userProfile?.username || user.email
-            };
-            await saveMessage(chatId, message, sessionKey);
+            await saveMessage(chatId, {
+                id: generateMessageId(), text: input,
+                senderId: user.uid, senderName: profile?.username || user.email,
+            }, sessionKey);
         }
-        
         setInput('');
     };
 
-    const handleTyping = useCallback(async (text) => {
-        setInput(text);
-        if (chatId && user) {
-            await setTypingStatus(chatId, user.uid, text.length > 0);
-            
-            if (typingTimeoutRef.current) {
-                clearTimeout(typingTimeoutRef.current);
-            }
-            
-            typingTimeoutRef.current = setTimeout(async () => {
-                await setTypingStatus(chatId, user.uid, false);
-            }, 2000);
-        }
+    const handleTyping = useCallback(async (v: string) => {
+        setInput(v);
+        if (!chatId || !user) return;
+        await setTypingStatus(chatId, user.uid, v.length > 0);
+        clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => setTypingStatus(chatId!, user.uid, false), 2000);
     }, [chatId, user]);
 
-    const handleReaction = async (messageId, emoji) => {
-        if (chatId) {
-            await addReaction(chatId, messageId, user.uid, emoji);
-            setShowReactionPicker(null);
-        }
-    };
-
-    const handleFileSelect = async (e, type) => {
-        const file = e.target.files[0];
-        if (!file || !user) return;
-
+    const handleFile = async (e: any, type: string) => {
+        const f = e.target.files?.[0];
+        if (!f || !user) return;
         if (type === 'avatar') {
-            const url = await uploadAvatar(user.uid, file);
-            setUserProfile(prev => ({ ...prev, avatar: url }));
-        } else if (type === 'status') {
-            await uploadStatus(user.uid, file, file.type.startsWith('video') ? 'video' : 'image');
-            loadStatuses();
-        } else if (type === 'chat') {
-            const url = await uploadFile(chatId, file, user.uid);
-            setSelectedFile({
-                name: file.name,
-                url,
-                type: file.type
-            });
+            const url = await uploadAvatar(user.uid, f);
+            if (url) {
+                setProfile((p: any) => ({ ...p, avatar: url }));
+                await updateUserProfile(user.uid, { avatar: url });
+            }
+        } else {
+            const url = await uploadFile(chatId, f, user.uid);
+            if (url) setSelFile({ name: f.name, url, type: f.type });
         }
     };
 
-    const _updateBio = async (newBio) => {
-        await updateUserProfile(user.uid, { bio: newBio });
-        setUserProfile(prev => ({ ...prev, bio: newBio }));
-    };
-
-    const addEmoji = (emoji) => {
-        setInput(prev => prev + emoji);
-        setShowEmojiPicker(false);
-    };
-
-    if (loading) {
-        return (
+    // ── Loading ───────────────────────────────────────────────────
+    if (loading) return (
+        <div className="app">
             <div className="loading-screen">
-                <div className="loader"></div>
-                <p>Loading...</p>
+                <div className="logo-circle"><span>N</span></div>
+                <div className="spinner" />
             </div>
-        );
-    }
+        </div>
+    );
 
-    if (!user) {
-        return (
-            <div className="app">
-                <div className="welcome-container">
-                    <div className="hero-glow-1"></div>
-                    <div className="hero-glow-2"></div>
-                    
-                    <div className="logo-wrap">
-                        <div className="logo-outer">
-                            <div className="logo-inner">
-                                <span className="logo-mark">N</span>
-                            </div>
-                        </div>
+    // ── Auth ──────────────────────────────────────────────────────
+    if (!user) return (
+        <div className="app">
+            <div className="auth-wrap">
+                <div className="auth-glow1" /><div className="auth-glow2" />
+                <div className="auth-top">
+                    <div className="logo-circle"><span>N</span></div>
+                    <h1 className="auth-brand">NSS</h1>
+                    <p className="auth-sub">Клуб. Курсы. Общение.</p>
+                </div>
+                <div className="auth-box">
+                    <div className="auth-tabs">
+                        <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
+                        <button className={`auth-tab${!isLogin ? ' active' : ''}`} onClick={() => setIsLogin(false)}>Регистрация</button>
                     </div>
-
-                    <div className="brand">NSS</div>
-                    <h1 className="hero-title">Твой клуб.<br/>Курсы.<br/>Общение.</h1>
-                    <p className="hero-subtitle">
-                        Закрытое сообщество с курсами, чатами по городам и общением с единомышленниками.
-                    </p>
-
-                    <div className="feature-row">
-                        <div className="feature-pill"><span className="feature-pill-text">E2EE Ready UI</span></div>
-                        <div className="feature-pill"><span className="feature-pill-text">Live Status</span></div>
-                        <div className="feature-pill"><span className="feature-pill-text">Smart Sync</span></div>
-                    </div>
-
-                    <div style={{ height: 32 }}></div>
-
-                    <div className="primary-button" onClick={() => setIsLogin(true)}>
-                        <span className="primary-button-text">Войти</span>
-                    </div>
-                    <div style={{ height: 12 }}></div>
-                    <div className="primary-button ghost-button" onClick={() => setIsLogin(false)}>
-                        <span className="primary-button-text">Создать аккаунт</span>
-                    </div>
-
-                    <div className="auth-container">
-                        <h2 className="auth-title">NSS</h2>
-                        <p className="auth-subtitle">
-                            Вход в закрытый клуб
-                        </p>
-
-                        <div className="switcher">
-                            <div 
-                                className={`switcher-item ${isLogin ? 'active' : ''}`}
-                                onClick={() => setIsLogin(true)}
-                            >
-                                <span className="switcher-text">Вход</span>
-                            </div>
-                            <div 
-                                className={`switcher-item ${!isLogin ? 'active' : ''}`}
-                                onClick={() => setIsLogin(false)}
-                            >
-                                <span className="switcher-text">Регистрация</span>
-                            </div>
-                        </div>
-
-                        <div className="auth-card">
-                            {!isLogin && (
-                                <>
-                                    <label className="input-label">Имя</label>
-                                    <input
-                                        type="text"
-                                        className="input-field"
-                                        placeholder="Введите имя"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
-                                    />
-                                </>
-                            )}
-
-                            <label className="input-label">Email</label>
-                            <input
-                                type="email"
-                                className="input-field"
-                                placeholder="name@lava.sync"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-
-                            <label className="input-label">Пароль</label>
-                            <input
-                                type="password"
-                                className="input-field"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-
-                            {error && <p style={{ color: '#FF5C7A', marginTop: 8, fontSize: 13 }}>{error}</p>}
-
-                            <div style={{ height: 10 }}></div>
-
-                            <div className="primary-button" onClick={handleAuth}>
-                                <span className="primary-button-text">
-                                    {isLogin ? 'Войти в NSS' : 'Создать аккаунт'}
-                                </span>
-                            </div>
-
-                            <div className="link-btn">
-                                <span className="link-text">
-                                    {isLogin ? 'Забыли пароль?' : 'Уже есть аккаунт?'}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+                    {!isLogin && (
+                        <input className="nss-input" type="text" placeholder="Имя" value={uname} onChange={e => setUname(e.target.value)} />
+                    )}
+                    <input className="nss-input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+                    <input className="nss-input" type="password" placeholder="Пароль" value={password}
+                        onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} />
+                    {authErr && <p className="auth-err">{authErr}</p>}
+                    <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
                 </div>
             </div>
-        );
-    }
+        </div>
+    );
 
-    return (
+    // ── Chat Screen ───────────────────────────────────────────────
+    if (tab === 'chat' && partner) return (
         <div className="app">
-            {activeTab === 'chat' && currentPartner ? (
-                <div className="screen">
-                    <div className="room-header">
-                        <button className="header-back-btn" onClick={() => {
-                            setCurrentPartner(null);
-                            setChatId(null);
-                            setMessages([]);
-                            setActiveTab('chats');
-                            loadChats();
-                        }}>
-                            <IconArrow />
-                        </button>
-                        <div className="room-header-user" onClick={() => setShowProfile(true)}>
-                            <div className="room-avatar">
-                                <span style={{ 
-                                    width: '100%', 
-                                    height: '100%', 
-                                    borderRadius: '50%', 
-                                    background: '#8B5CF6',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    color: 'white',
-                                    fontSize: 18,
-                                    fontWeight: 800
-                                }}>
-                                    {currentPartner.username?.[0] || '?'}
+            <div className="chat-screen">
+                <div className="chat-header">
+                    <button className="icon-btn" onClick={goBack}><IcoBack /></button>
+                    <Ava src={partner.avatar} name={partner.username} size={40} />
+                    <div className="chat-header-info">
+                        <div className="chat-header-name">{partner.username}</div>
+                        <div className="chat-header-status">{typing.length > 0 ? 'печатает...' : 'онлайн'}</div>
+                    </div>
+                </div>
+
+                <div className="msgs-area">
+                    {messages.map(msg => (
+                        <div key={msg.id} className={`msg-row ${msg.senderId === user.uid ? 'msg-me' : 'msg-them'}`}
+                            onContextMenu={e => { e.preventDefault(); setReactionFor(msg.id); }}>
+                            <div className={`bubble ${msg.senderId === user.uid ? 'bubble-me' : 'bubble-them'}`}>
+                                {msg.fileUrl && msg.fileType?.startsWith('image/')
+                                    ? <img src={msg.fileUrl} alt="" className="msg-img" />
+                                    : msg.fileUrl
+                                        ? <div className="msg-file-chip">📎 {msg.text?.replace('[File] ', '')}</div>
+                                        : null
+                                }
+                                {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
+                                <span className="bubble-time">
+                                    {msg.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''}
                                 </span>
-                                <div className="room-online"></div>
                             </div>
-                            <div>
-                                <div className="room-name">{currentPartner.username}</div>
-                                <div className="room-status">
-                                    {typingUsers.length > 0 ? 'печатает...' : 'online'}
+                            {msg.reactions?.length > 0 && (
+                                <div className="reactions-row">
+                                    {msg.reactions.map((r: any, i: number) => (
+                                        <span key={i} className="reaction">{r.emoji}</span>
+                                    ))}
                                 </div>
-                            </div>
+                            )}
+                            {reactionFor === msg.id && (
+                                <div className="reaction-picker">
+                                    {REACTIONS.map(em => (
+                                        <button key={em} onClick={() => { addReaction(chatId!, msg.id, user.uid, em); setReactionFor(null); }}>{em}</button>
+                                    ))}
+                                    <button onClick={() => setReactionFor(null)} style={{ opacity: 0.5 }}>✕</button>
+                                </div>
+                            )}
                         </div>
-                        <button className="header-circle-btn-small">
-                            <IconCall />
-                        </button>
-                    </div>
+                    ))}
+                    <div ref={endRef} />
+                </div>
 
-                    <div className="messages-list">
-                        {messages.map((msg) => (
-                            <div 
-                                key={msg.id} 
-                                className={`message-row ${msg.senderId === user.uid ? 'message-row-me' : 'message-row-them'}`}
-                                onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    setShowReactionPicker(msg.id);
-                                }}
-                            >
-                                <div className={`message-bubble ${msg.senderId === user.uid ? 'message-bubble-me' : 'message-bubble-them'}`}>
-                                    {msg.fileUrl && (
-                                        msg.fileType?.startsWith('image/') 
-                                            ? <img src={msg.fileUrl} alt="" className="message-image" />
-                                            : <div className="message-file">📎 {msg.text}</div>
-                                    )}
-                                    {msg.text && !msg.fileUrl && (
-                                        <span className="message-text">{msg.text}</span>
-                                    )}
-                                    <span className="message-time">
-                                        {msg.timestamp?.toLocaleTimeString?.() || msg.timestamp}
-                                    </span>
-                                </div>
-                                {msg.reactions?.length > 0 && (
-                                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                                        {msg.reactions.map((r, i) => (
-                                            <span key={i} style={{ 
-                                                fontSize: 14, 
-                                                background: '#11131A', 
-                                                padding: '2px 6px', 
-                                                borderRadius: 8 
-                                            }}>{r.emoji}</span>
-                                        ))}
-                                    </div>
-                                )}
-                                {showReactionPicker === msg.id && (
-                                    <div style={{ 
-                                        display: 'flex', 
-                                        gap: 4, 
-                                        marginTop: 8,
-                                        background: '#11131A',
-                                        padding: 8,
-                                        borderRadius: 20
-                                    }}>
-                                        {REACTIONS.map((emoji) => (
-                                            <button 
-                                                key={emoji}
-                                                onClick={() => handleReaction(msg.id, emoji)}
-                                                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
-                                            >
-                                                {emoji}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                        <div ref={messagesEndRef} />
+                {showEmoji && (
+                    <div className="emoji-panel">
+                        {EMOJIS.map(em => <button key={em} onClick={() => { setInput(p => p + em); setShowEmoji(false); }}>{em}</button>)}
                     </div>
+                )}
 
-                    {showEmojiPicker && (
-                        <div className="emoji-picker">
-                            <div className="emoji-grid">
-                                {EMOJIS.map((emoji) => (
-                                    <button key={emoji} onClick={() => addEmoji(emoji)}>
-                                        {emoji}
-                                    </button>
-                                ))}
-                            </div>
+                <div className="composer">
+                    <button className="composer-btn" onClick={() => fileRef.current?.click()}>📎</button>
+                    <input type="file" ref={fileRef} accept="image/*,video/*,.pdf,.doc,.docx" style={{ display: 'none' }} onChange={e => handleFile(e, 'chat')} />
+                    <button className="composer-btn" onClick={() => setShowEmoji(v => !v)}>😊</button>
+                    {selFile && (
+                        <div className="file-chip">
+                            <span>{selFile.name}</span>
+                            <button onClick={() => setSelFile(null)}>✕</button>
                         </div>
                     )}
-
-                    <div className="composer-wrap">
-                        <button className="header-circle-btn" onClick={() => fileInputRef.current?.click()}>
-                            📎
-                        </button>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            accept="image/*,video/*,.pdf,.doc,.docx"
-                            style={{ display: 'none' }}
-                            onChange={(e) => handleFileSelect(e, 'chat')}
-                        />
-                        
-                        {selectedFile && (
-                            <div className="file-preview">
-                                <span>📎 {selectedFile.name}</span>
-                                <button className="remove-file" onClick={() => setSelectedFile(null)}>✕</button>
-                            </div>
-                        )}
-                        
-                        <button className="header-circle-btn" onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-                            😊
-                        </button>
-                        
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(e) => handleTyping(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                            placeholder="Сообщение..."
-                            className="composer-input"
-                        />
-                        <button className="send-btn" onClick={sendMessage}>
-                            <IconSend />
-                        </button>
-                    </div>
+                    <input type="text" className="composer-input" value={input} placeholder="Сообщение..."
+                        onChange={e => handleTyping(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
+                    <button className="send-btn" onClick={send}><IcoSend /></button>
                 </div>
-            ) : (
-                <>
-                    <div className="screen">
-                        <div className="screen-header">
+            </div>
+        </div>
+    );
+
+    // ── Main ──────────────────────────────────────────────────────
+    return (
+        <div className="app">
+            <div className="main-wrap">
+
+                {/* CHATS */}
+                {tab === 'chats' && (
+                    <div className="page">
+                        <div className="page-hdr">
                             <div>
-                                <div className="screen-eyebrow">NSS</div>
-                                <h1 className="screen-title">
-                                    {activeTab === 'chats' ? 'Сообщения' : activeTab === 'courses' ? 'Курсы' : 'Профиль'}
-                                </h1>
+                                <div className="eyebrow">NSS</div>
+                                <h1 className="page-title">Сообщения</h1>
                             </div>
-                            <button className="header-circle-btn" onClick={() => setShowProfile(true)}>
-                                <span className="header-circle-btn-text">＋</span>
-                            </button>
                         </div>
 
-                        <div className="search-wrap">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Поиск чатов"
-                                className="search-input"
-                            />
+                        <div className="search-row">
+                            <input className="search-input" type="text" placeholder="🔍  Поиск чатов" />
                         </div>
 
-                        {activeTab === 'chats' && (
-                            <>
-                                <div className="story-row">
-                                    {onlineUsers.map((u) => (
-                                        <div key={u.userId} className="story-item" onClick={() => startChat(u.userId, u.username)}>
-                                            <div className="story-avatar-wrap">
-                                                <div className="story-avatar" style={{ 
-                                                    background: '#8B5CF6',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: 20,
-                                                    fontWeight: 800
-                                                }}>
-                                                    {u.avatar 
-                                                        ? <img src={u.avatar} alt="" /> 
-                                                        : u.username?.[0] || '?'
-                                                    }
-                                                </div>
-                                                <div className="story-online"></div>
-                                            </div>
-                                            <span className="story-name">{u.username}</span>
+                        {online.length > 0 && (
+                            <div className="stories">
+                                {online.map((u: any) => (
+                                    <div key={u.userId} className="story" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                        <div className="story-ava">
+                                            <Ava src={u.avatar} name={u.username} size={56} />
+                                            <div className="story-dot" />
                                         </div>
-                                    ))}
-                                </div>
-
-                                {/* Городские чаты */}
-                                <div style={{ padding: '8px 0 4px' }}>
-                                    <div
-                                        style={{ padding: '8px 16px', color: '#8C93A8', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
-                                        onClick={() => setCityChatsSection(v => !v)}
-                                    >
-                                        <span>🏙 Города</span>
-                                        <span style={{ fontSize: 11 }}>{cityChatsSection ? '▲' : '▼'}</span>
-                                    </div>
-                                    {cityChatsSection && [
-                                        { id: 'city_moscow', name: 'Москва', emoji: '🏛' },
-                                        { id: 'city_spb', name: 'Санкт-Петербург', emoji: '🌉' },
-                                        { id: 'city_novosibirsk', name: 'Новосибирск', emoji: '🌲' },
-                                        { id: 'city_yekaterinburg', name: 'Екатеринбург', emoji: '🏔' },
-                                        { id: 'city_kazan', name: 'Казань', emoji: '🕌' },
-                                    ].map(city => (
-                                        <div
-                                            key={city.id}
-                                            className="chat-card"
-                                            onClick={() => startChat(`__group_${city.id}`, city.name)}
-                                        >
-                                            <div className="avatar">
-                                                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#1E2030', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
-                                                    {city.emoji}
-                                                </div>
-                                            </div>
-                                            <div className="chat-mid">
-                                                <div className="chat-top-row">
-                                                    <span className="chat-name">{city.name}</span>
-                                                </div>
-                                                <span className="chat-last-message">Городской чат участников клуба</span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="chat-list">
-                                    {chats.map((chat) => {
-                                        const partner = chat.partner;
-                                        return (
-                                            <div 
-                                                key={chat.chatId} 
-                                                className="chat-card" 
-                                                onClick={() => startChat(chat.partnerId, partner?.username, partner?.avatar)}
-                                            >
-                                                <div className="avatar">
-                                                    <div style={{ 
-                                                        width: '100%', 
-                                                        height: '100%', 
-                                                        borderRadius: '50%', 
-                                                        background: '#8B5CF6',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        color: 'white',
-                                                        fontSize: 20,
-                                                        fontWeight: 800
-                                                    }}>
-                                                        {partner?.avatar 
-                                                            ? <img src={partner.avatar} alt="" /> 
-                                                            : partner?.username?.[0] || '?'
-                                                        }
-                                                    </div>
-                                                    {partner?.status === 'online' && <div className="online-dot"></div>}
-                                                </div>
-                                                <div className="chat-mid">
-                                                    <div className="chat-top-row">
-                                                        <div className="chat-name-row">
-                                                            <span className="chat-name">{partner?.username || 'Unknown'}</span>
-                                                            {partner?.verified && (
-                                                                <div className="verified-badge">
-                                                                    <span className="verified-text">✓</span>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <span className="chat-time">
-                                                            {chat.lastMessageTime 
-                                                                ? new Date(chat.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                                : ''
-                                                            }
-                                                        </span>
-                                                    </div>
-                                                    <span className="chat-last-message">
-                                                        {chat.lastMessage || 'Нет сообщений'}
-                                                    </span>
-                                                </div>
-                                                {chat.unreadCount > 0 && (
-                                                    <div className="unread-badge">
-                                                        <span className="unread-text">{chat.unreadCount}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-
-                                    {chats.length === 0 && onlineUsers.length > 0 && onlineUsers.map((u) => (
-                                        <div key={u.userId} className="chat-card" onClick={() => startChat(u.userId, u.username, u.avatar)}>
-                                            <div className="avatar">
-                                                <div style={{ 
-                                                    width: '100%', 
-                                                    height: '100%', 
-                                                    borderRadius: '50%', 
-                                                    background: '#8B5CF6',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: 20,
-                                                    fontWeight: 800
-                                                }}>
-                                                    {u.avatar 
-                                                        ? <img src={u.avatar} alt="" /> 
-                                                        : u.username?.[0] || '?'
-                                                    }
-                                                </div>
-                                                <div className="online-dot"></div>
-                                            </div>
-                                            <div className="chat-mid">
-                                                <div className="chat-top-row">
-                                                    <div className="chat-name-row">
-                                                        <span className="chat-name">{u.username}</span>
-                                                    </div>
-                                                </div>
-                                                <span className="chat-last-message">Нажмите, чтобы начать чат</span>
-                                            </div>
-                                        </div>
-                                    ))}
-
-                                    {chats.length === 0 && onlineUsers.length === 0 && !searchQuery && (
-                                        <div className="no-users">
-                                            Нет чатов. Начните общение с пользователями ниже!
-                                        </div>
-                                    )}
-
-                                    {!searchQuery && onlineUsers.length > 0 && chats.length > 0 && (
-                                        <div style={{ padding: '12px', color: '#8C93A8', fontSize: 13 }}>
-                                            Новые пользователи
-                                        </div>
-                                    )}
-                                </div>
-                            </>
-                        )}
-
-                        {activeTab === 'courses' && (
-                            <div className="courses-wrap" style={{ padding: '0 16px 100px' }}>
-                                {[
-                                    { title: 'Продажи с нуля', lessons: 24, color: '#8B5CF6', desc: 'Фундамент продаж: скрипты, возражения, закрытие сделок' },
-                                    { title: 'Построение команды', lessons: 18, color: '#EC4899', desc: 'Найм, адаптация и управление отделом продаж' },
-                                    { title: 'Личный бренд', lessons: 12, color: '#F59E0B', desc: 'Как стать экспертом в своей нише' },
-                                    { title: 'Финансовый менеджмент', lessons: 15, color: '#10B981', desc: 'Планирование, контроль и масштабирование выручки' },
-                                    { title: 'Переговоры и влияние', lessons: 20, color: '#EF4444', desc: 'Психология переговоров и техники убеждения' },
-                                ].map((course, i) => (
-                                    <div key={i} style={{
-                                        background: '#11131A',
-                                        borderRadius: 16,
-                                        padding: 16,
-                                        marginBottom: 12,
-                                        border: '1px solid rgba(255,255,255,0.06)'
-                                    }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                            <div style={{
-                                                width: 48, height: 48, borderRadius: 12,
-                                                background: course.color,
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                fontSize: 22, flexShrink: 0
-                                            }}>📚</div>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{course.title}</div>
-                                                <div style={{ color: '#8C93A8', fontSize: 12, marginTop: 2 }}>{course.desc}</div>
-                                            </div>
-                                        </div>
-                                        <div style={{ marginTop: 12 }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                                <span style={{ color: '#8C93A8', fontSize: 12 }}>{course.lessons} уроков</span>
-                                                <span style={{ color: course.color, fontSize: 12 }}>0%</span>
-                                            </div>
-                                            <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 4, height: 4 }}>
-                                                <div style={{ width: '0%', height: '100%', background: course.color, borderRadius: 4 }} />
-                                            </div>
-                                        </div>
+                                        <span className="story-name">{(u.username || '').split(' ')[0]}</span>
                                     </div>
                                 ))}
                             </div>
                         )}
 
-                        {activeTab === 'profile' && (
-                            <div className="profile-wrap">
-                                <div className="profile-hero">
-                                    <div className="profile-glow"></div>
-                                    <div
-                                        className="profile-avatar"
-                                        onClick={() => avatarInputRef.current?.click()}
-                                    >
-                                        {userProfile?.avatar
-                                            ? <img src={userProfile.avatar} alt="" />
-                                            : (userProfile?.username?.[0] || user.email[0])
-                                        }
-                                    </div>
-                                    <input
-                                        type="file"
-                                        ref={avatarInputRef}
-                                        accept="image/*"
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => handleFileSelect(e, 'avatar')}
-                                    />
-                                    <h2 className="profile-name">{userProfile?.username || user.email}</h2>
-                                    <span className="profile-username">@{userProfile?.username?.toLowerCase().replace(/\s/g, '') || 'user'}</span>
+                        <div className="list-section" onClick={() => setCityOpen(v => !v)}>
+                            <span>🏙 Города</span>
+                            <span>{cityOpen ? '▲' : '▼'}</span>
+                        </div>
 
-                                    <div className="stats-row">
-                                        <div className="stat-card">
-                                            <div className="stat-title">{onlineUsers.length + 5}</div>
-                                            <div className="stat-subtitle">Chats</div>
+                        {cityOpen && CITY_CHATS.map(c => (
+                            <div key={c.id} className="chat-row" onClick={() => startChat(`__group_${c.id}`, c.name)}>
+                                <div className="ava city-ava" style={{ width: 52, height: 52, minWidth: 52, background: c.color }}>
+                                    <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{c.short}</span>
+                                </div>
+                                <div className="chat-info">
+                                    <div className="chat-row-top">
+                                        <span className="chat-name">{c.name}</span>
+                                    </div>
+                                    <span className="chat-preview">Городской чат клуба</span>
+                                </div>
+                            </div>
+                        ))}
+
+                        {chats.length > 0 && <div className="list-section-plain">Личные чаты</div>}
+
+                        {chats.map((ch: any) => {
+                            const p = ch.partner;
+                            return (
+                                <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
+                                    <Ava src={p?.avatar} name={p?.username || '?'} size={52} online={p?.status === 'online'} />
+                                    <div className="chat-info">
+                                        <div className="chat-row-top">
+                                            <span className="chat-name">{p?.username || 'Пользователь'}</span>
+                                            <span className="chat-time">
+                                                {ch.lastMessageTime ? new Date(ch.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                            </span>
                                         </div>
-                                        <div className="stat-card">
-                                            <div className="stat-title">3</div>
-                                            <div className="stat-subtitle">Calls</div>
-                                        </div>
-                                        <div className="stat-card">
-                                            <div className="stat-title">Pro</div>
-                                            <div className="stat-subtitle">Plan</div>
+                                        <div className="chat-row-bot">
+                                            <span className="chat-preview">{ch.lastMessage || 'Нет сообщений'}</span>
+                                            {ch.unreadCount > 0 && <span className="unread">{ch.unreadCount}</span>}
                                         </div>
                                     </div>
                                 </div>
+                            );
+                        })}
 
-                                <div className="settings-card">
-                                    {['Аккаунт', 'Приватность', 'Уведомления', 'Оформление', 'Безопасность', 'Поддержка'].map(item => (
-                                        <div key={item} className="settings-row">
-                                            <span className="settings-text">{item}</span>
-                                            <IconArrow color="#8C93A8" />
-                                        </div>
-                                    ))}
-                                    <div
-                                        className="settings-row"
-                                        onClick={handleLogout}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        <span className="settings-text" style={{ color: '#FF5C7A' }}>Выйти</span>
-                                        <IconArrow color="#FF5C7A" />
-                                    </div>
-                                </div>
+                        {chats.length === 0 && online.length === 0 && (
+                            <div className="empty-state">
+                                <p style={{ fontSize: 40 }}>💬</p>
+                                <p>Нет чатов</p>
                             </div>
                         )}
                     </div>
+                )}
 
-                    <div className="tab-bar">
-                        <div
-                            className={`tab-item ${activeTab === 'chats' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('chats')}
-                        >
-                            <span className="tab-icon">💬</span>
-                            <span className="tab-label">Чаты</span>
+                {/* COURSES */}
+                {tab === 'courses' && (
+                    <div className="page">
+                        <div className="page-hdr">
+                            <div>
+                                <div className="eyebrow">NSS</div>
+                                <h1 className="page-title">Курсы</h1>
+                            </div>
                         </div>
-                        <div
-                            className={`tab-item ${activeTab === 'courses' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('courses')}
-                        >
-                            <span className="tab-icon">📚</span>
-                            <span className="tab-label">Курсы</span>
+                        {COURSES.map((c, i) => (
+                            <div key={i} className="course-card">
+                                <div className="course-ico" style={{ background: c.color }}>{c.icon}</div>
+                                <div className="course-body">
+                                    <div className="course-title">{c.title}</div>
+                                    <div className="course-desc">{c.desc}</div>
+                                    <div className="course-footer">
+                                        <span className="course-lessons">{c.lessons} уроков</span>
+                                        <div className="progress-bar">
+                                            <div className="progress-fill" style={{ background: c.color }} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* PROFILE */}
+                {tab === 'profile' && (
+                    <div className="page">
+                        <div className="profile-hero">
+                            <div className="profile-glow" />
+                            <div className="profile-ava-btn" onClick={() => avaRef.current?.click()}>
+                                <Ava src={profile?.avatar} name={profile?.username || user.email} size={90} />
+                                <div className="ava-edit-badge">✏️</div>
+                            </div>
+                            <input type="file" ref={avaRef} accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'avatar')} />
+                            <h2 className="profile-name">{profile?.username || user.email}</h2>
+                            <p className="profile-handle">@{(profile?.username || 'user').toLowerCase().replace(/\s/g, '')}</p>
+                            <div className="profile-stats">
+                                <div className="stat"><div className="stat-val">{chats.length}</div><div className="stat-lbl">Чаты</div></div>
+                                <div className="stat"><div className="stat-val">5</div><div className="stat-lbl">Курсы</div></div>
+                                <div className="stat"><div className="stat-val">Pro</div><div className="stat-lbl">Тариф</div></div>
+                            </div>
                         </div>
-                        <div
-                            className={`tab-item ${activeTab === 'profile' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('profile')}
-                        >
-                            <span className="tab-icon">👤</span>
-                            <span className="tab-label">Профиль</span>
+
+                        <div className="settings-list">
+                            {[
+                                ['👤', 'Аккаунт'],
+                                ['🔔', 'Уведомления'],
+                                ['🔒', 'Приватность'],
+                                ['🎨', 'Оформление'],
+                                ['🛡', 'Безопасность'],
+                                ['💬', 'Поддержка'],
+                            ].map(([ico, lbl]) => (
+                                <div key={lbl} className="settings-row">
+                                    <span className="settings-ico">{ico}</span>
+                                    <span className="settings-lbl">{lbl}</span>
+                                    <IcoArrow />
+                                </div>
+                            ))}
+                            <div className="settings-row settings-danger" onClick={handleLogout}>
+                                <span className="settings-ico">🚪</span>
+                                <span className="settings-lbl" style={{ color: '#FF5C7A' }}>Выйти</span>
+                                <IcoArrow />
+                            </div>
                         </div>
                     </div>
-                </>
-            )}
+                )}
+            </div>
 
-            {showProfile && (
-                <div className="modal-overlay" onClick={() => setShowProfile(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="avatar-large" onClick={() => avatarInputRef.current?.click()}>
-                            {userProfile?.avatar
-                                ? <img src={userProfile.avatar} alt="" />
-                                : (userProfile?.username?.[0] || user.email[0])
-                            }
-                        </div>
-                        <input
-                            type="file"
-                            ref={avatarInputRef}
-                            accept="image/*"
-                            style={{ display: 'none' }}
-                            onChange={(e) => handleFileSelect(e, 'avatar')}
-                        />
-                        <h2 className="profile-name">{userProfile?.username || user.email}</h2>
-                        <p className="profile-username">{user.email}</p>
-
-                        <div className="theme-toggle">
-                            <span className="theme-label">{theme === 'dark' ? '🌙 Dark Mode' : '☀️ Light Mode'}</span>
-                            <div 
-                                className={`toggle-switch ${theme === 'light' ? 'active' : ''}`}
-                                onClick={toggleTheme}
-                            />
-                        </div>
-
-                        <div className="security-info">
-                            <span>🔐 E2E Encrypted</span>
-                            <code>{sessionKey?.substring(0, 16)}...</code>
-                        </div>
-
-                        <button className="close-btn" onClick={() => setShowProfile(false)}>
-                            Close
-                        </button>
-                    </div>
-                </div>
-            )}
+            {/* BOTTOM NAV */}
+            <div className="bottom-nav">
+                <button className={`nav-btn${tab === 'chats' ? ' nav-active' : ''}`} onClick={() => setTab('chats')}>
+                    <span className="nav-ico">💬</span>
+                    <span className="nav-lbl">Чаты</span>
+                </button>
+                <button className={`nav-btn${tab === 'courses' ? ' nav-active' : ''}`} onClick={() => setTab('courses')}>
+                    <span className="nav-ico">📚</span>
+                    <span className="nav-lbl">Курсы</span>
+                </button>
+                <button className={`nav-btn${tab === 'profile' ? ' nav-active' : ''}`} onClick={() => setTab('profile')}>
+                    <span className="nav-ico">👤</span>
+                    <span className="nav-lbl">Профиль</span>
+                </button>
+            </div>
         </div>
     );
 }
 
 export default function AppWrapper() {
-    return (
-        <ErrorBoundary>
-            <App />
-        </ErrorBoundary>
-    );
+    return <ErrorBoundary><App /></ErrorBoundary>;
 }
