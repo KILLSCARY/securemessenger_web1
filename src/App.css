@@ -312,7 +312,13 @@ input  { font-family: inherit; }
 
 /* ── Chat screen ────────────────────────────────────────────────── */
 .chat-screen {
-    display: flex; flex-direction: column; height: 100%;
+    position: absolute;
+    inset: 0;
+    top: env(safe-area-inset-top, 0px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    z-index: 100;
 }
 .chat-header {
     display: flex; align-items: center; gap: 12px;
