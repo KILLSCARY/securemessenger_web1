@@ -28,6 +28,7 @@ import {
     uploadFile,
     getStatuses
 } from './utils/firebaseService';
+import './App.css';
 
 class ErrorBoundary extends Component {
     constructor(props) {
@@ -60,8 +61,6 @@ class ErrorBoundary extends Component {
         return this.props.children;
     }
 }
-
-import './App.css';
 
 const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 const EMOJIS = ['😀', '😂', '😍', '🥰', '😎', '🤔', '😅', '😭', '😤', '🥳', '😴', '🤯', '👍', '👎', '👋', '🙏', '💪', '🎉', '🔥', '❤️', '💔', '✨', '🌟', '💯'];
@@ -127,6 +126,7 @@ function App() {
     const [chats, setChats] = useState([]);
     const [onlineUsers, setOnlineUsers] = useState([]);
     const [typingUsers, setTypingUsers] = useState([]);
+    const [cityChatsSection, setCityChatsSection] = useState(false);
 
     const [activeTab, setActiveTab] = useState('chats');
     const [showProfile, setShowProfile] = useState(false);
@@ -137,6 +137,7 @@ function App() {
     const [selectedFile, setSelectedFile] = useState(null);
 
     const fileInputRef = useRef(null);
+    const avatarInputRef = useRef(null);
     const messagesEndRef = useRef(null);
     const typingTimeoutRef = useRef(null);
 
@@ -151,13 +152,14 @@ function App() {
             if (firebaseUser) {
                 setUser(firebaseUser);
                 let profile = await getUserProfile(firebaseUser.uid);
-                
+
                 if (!profile) {
                     const username = sessionStorage.getItem('temp_username') || firebaseUser.email.split('@')[0];
                     profile = await createUserProfile(firebaseUser.uid, username, firebaseUser.email);
                     sessionStorage.removeItem('temp_username');
                 }
-                
+
+                await updateUserProfile(firebaseUser.uid, { status: 'online' });
                 setUserProfile(profile);
             } else {
                 setUser(null);
@@ -168,6 +170,14 @@ function App() {
 
         return () => unsubscribe();
     }, []);
+
+    useEffect(() => {
+        const markOffline = () => {
+            if (user) updateUserProfile(user.uid, { status: 'offline' });
+        };
+        window.addEventListener('beforeunload', markOffline);
+        return () => window.removeEventListener('beforeunload', markOffline);
+    }, [user]);
 
     useEffect(() => {
         if (user && chatId && sessionKey) {
@@ -234,10 +244,14 @@ function App() {
         setLoading(false);
     };
 
-    const _handleLogout = async () => {
+    const handleLogout = async () => {
+        if (user) {
+            await updateUserProfile(user.uid, { status: 'offline' });
+        }
         await signOut(auth);
         setCurrentPartner(null);
         setChatId(null);
+        setActiveTab('chats');
         setMessages([]);
     };
 
@@ -249,7 +263,9 @@ function App() {
     };
 
     const startChat = async (partnerId, partnerName, partnerAvatar = null) => {
-        const newChatId = await createChat(user.uid, partnerId);
+        // City group chats use a fixed chatId without creating a 1-on-1 chat entry
+        const isGroupChat = partnerId.startsWith('__group_');
+        const newChatId = isGroupChat ? partnerId.replace('__group_', '') : await createChat(user.uid, partnerId);
         const key = await getChatSessionKey(newChatId, user.uid);
         
         setChatId(newChatId);
@@ -475,6 +491,8 @@ function App() {
                             setCurrentPartner(null);
                             setChatId(null);
                             setMessages([]);
+                            setActiveTab('chats');
+                            loadChats();
                         }}>
                             <IconArrow />
                         </button>
@@ -607,7 +625,7 @@ function App() {
                             type="text"
                             value={input}
                             onChange={(e) => handleTyping(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                             placeholder="Сообщение..."
                             className="composer-input"
                         />
@@ -623,7 +641,7 @@ function App() {
                             <div>
                                 <div className="screen-eyebrow">LAVASYNC</div>
                                 <h1 className="screen-title">
-                                    {activeTab === 'chats' ? 'Сообщения' : activeTab === 'calls' ? 'Звонки' : 'Профиль'}
+                                    {activeTab === 'chats' ? 'Сообщения' : activeTab === 'courses' ? 'Курсы' : 'Профиль'}
                                 </h1>
                             </div>
                             <button className="header-circle-btn" onClick={() => setShowProfile(true)}>
@@ -664,6 +682,42 @@ function App() {
                                                 <div className="story-online"></div>
                                             </div>
                                             <span className="story-name">{u.username}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Городские чаты */}
+                                <div style={{ padding: '8px 0 4px' }}>
+                                    <div
+                                        style={{ padding: '8px 16px', color: '#8C93A8', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                        onClick={() => setCityChatsSection(v => !v)}
+                                    >
+                                        <span>🏙 Города</span>
+                                        <span style={{ fontSize: 11 }}>{cityChatsSection ? '▲' : '▼'}</span>
+                                    </div>
+                                    {cityChatsSection && [
+                                        { id: 'city_moscow', name: 'Москва', emoji: '🏛' },
+                                        { id: 'city_spb', name: 'Санкт-Петербург', emoji: '🌉' },
+                                        { id: 'city_novosibirsk', name: 'Новосибирск', emoji: '🌲' },
+                                        { id: 'city_yekaterinburg', name: 'Екатеринбург', emoji: '🏔' },
+                                        { id: 'city_kazan', name: 'Казань', emoji: '🕌' },
+                                    ].map(city => (
+                                        <div
+                                            key={city.id}
+                                            className="chat-card"
+                                            onClick={() => startChat(`__group_${city.id}`, city.name)}
+                                        >
+                                            <div className="avatar">
+                                                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#1E2030', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+                                                    {city.emoji}
+                                                </div>
+                                            </div>
+                                            <div className="chat-mid">
+                                                <div className="chat-top-row">
+                                                    <span className="chat-name">{city.name}</span>
+                                                </div>
+                                                <span className="chat-last-message">Городской чат участников клуба</span>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -775,32 +829,45 @@ function App() {
                             </>
                         )}
 
-                        {activeTab === 'calls' && (
-                            <div className="calls-wrap">
-                                <div className="chat-card">
-                                    <div className="avatar">
-                                        <div style={{ 
-                                            width: '100%', 
-                                            height: '100%', 
-                                            borderRadius: '50%', 
-                                            background: '#8B5CF6',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: 'white',
-                                            fontSize: 20,
-                                            fontWeight: 800
-                                        }}>S</div>
+                        {activeTab === 'courses' && (
+                            <div className="courses-wrap" style={{ padding: '0 16px 100px' }}>
+                                {[
+                                    { title: 'Продажи с нуля', lessons: 24, color: '#8B5CF6', desc: 'Фундамент продаж: скрипты, возражения, закрытие сделок' },
+                                    { title: 'Построение команды', lessons: 18, color: '#EC4899', desc: 'Найм, адаптация и управление отделом продаж' },
+                                    { title: 'Личный бренд', lessons: 12, color: '#F59E0B', desc: 'Как стать экспертом в своей нише' },
+                                    { title: 'Финансовый менеджмент', lessons: 15, color: '#10B981', desc: 'Планирование, контроль и масштабирование выручки' },
+                                    { title: 'Переговоры и влияние', lessons: 20, color: '#EF4444', desc: 'Психология переговоров и техники убеждения' },
+                                ].map((course, i) => (
+                                    <div key={i} style={{
+                                        background: '#11131A',
+                                        borderRadius: 16,
+                                        padding: 16,
+                                        marginBottom: 12,
+                                        border: '1px solid rgba(255,255,255,0.06)'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                            <div style={{
+                                                width: 48, height: 48, borderRadius: 12,
+                                                background: course.color,
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: 22, flexShrink: 0
+                                            }}>📚</div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{course.title}</div>
+                                                <div style={{ color: '#8C93A8', fontSize: 12, marginTop: 2 }}>{course.desc}</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ marginTop: 12 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                                <span style={{ color: '#8C93A8', fontSize: 12 }}>{course.lessons} уроков</span>
+                                                <span style={{ color: course.color, fontSize: 12 }}>0%</span>
+                                            </div>
+                                            <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 4, height: 4 }}>
+                                                <div style={{ width: '0%', height: '100%', background: course.color, borderRadius: 4 }} />
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="chat-mid">
-                                        <span className="chat-name">Sofia</span>
-                                        <span className="chat-username">Incoming video</span>
-                                        <span className="chat-time">Сегодня, 09:12</span>
-                                    </div>
-                                    <div className="call-icon-wrap">
-                                        <IconCall />
-                                    </div>
-                                </div>
+                                ))}
                             </div>
                         )}
 
@@ -808,18 +875,18 @@ function App() {
                             <div className="profile-wrap">
                                 <div className="profile-hero">
                                     <div className="profile-glow"></div>
-                                    <div 
+                                    <div
                                         className="profile-avatar"
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={() => avatarInputRef.current?.click()}
                                     >
-                                        {userProfile?.avatar 
-                                            ? <img src={userProfile.avatar} alt="" /> 
+                                        {userProfile?.avatar
+                                            ? <img src={userProfile.avatar} alt="" />
                                             : (userProfile?.username?.[0] || user.email[0])
                                         }
                                     </div>
                                     <input
                                         type="file"
-                                        ref={fileInputRef}
+                                        ref={avatarInputRef}
                                         accept="image/*"
                                         style={{ display: 'none' }}
                                         onChange={(e) => handleFileSelect(e, 'avatar')}
@@ -850,32 +917,40 @@ function App() {
                                             <IconArrow color="#8C93A8" />
                                         </div>
                                     ))}
+                                    <div
+                                        className="settings-row"
+                                        onClick={handleLogout}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <span className="settings-text" style={{ color: '#FF5C7A' }}>Выйти</span>
+                                        <IconArrow color="#FF5C7A" />
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
 
                     <div className="tab-bar">
-                        <div 
+                        <div
                             className={`tab-item ${activeTab === 'chats' ? 'active' : ''}`}
                             onClick={() => setActiveTab('chats')}
                         >
                             <span className="tab-icon">💬</span>
-                            <span className="tab-label">Chats</span>
+                            <span className="tab-label">Чаты</span>
                         </div>
-                        <div 
-                            className={`tab-item ${activeTab === 'calls' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('calls')}
+                        <div
+                            className={`tab-item ${activeTab === 'courses' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('courses')}
                         >
-                            <span className="tab-icon">📞</span>
-                            <span className="tab-label">Calls</span>
+                            <span className="tab-icon">📚</span>
+                            <span className="tab-label">Курсы</span>
                         </div>
-                        <div 
+                        <div
                             className={`tab-item ${activeTab === 'profile' ? 'active' : ''}`}
                             onClick={() => setActiveTab('profile')}
                         >
                             <span className="tab-icon">👤</span>
-                            <span className="tab-label">Profile</span>
+                            <span className="tab-label">Профиль</span>
                         </div>
                     </div>
                 </>
@@ -884,15 +959,15 @@ function App() {
             {showProfile && (
                 <div className="modal-overlay" onClick={() => setShowProfile(false)}>
                     <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="avatar-large" onClick={() => fileInputRef.current?.click()}>
-                            {userProfile?.avatar 
-                                ? <img src={userProfile.avatar} alt="" /> 
+                        <div className="avatar-large" onClick={() => avatarInputRef.current?.click()}>
+                            {userProfile?.avatar
+                                ? <img src={userProfile.avatar} alt="" />
                                 : (userProfile?.username?.[0] || user.email[0])
                             }
                         </div>
                         <input
                             type="file"
-                            ref={fileInputRef}
+                            ref={avatarInputRef}
                             accept="image/*"
                             style={{ display: 'none' }}
                             onChange={(e) => handleFileSelect(e, 'avatar')}

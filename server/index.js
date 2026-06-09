@@ -161,7 +161,7 @@ function handleMessage(senderId, message) {
             break;
 
         case 'disconnect':
-            ws.close();
+            sender.ws.close();
             break;
     }
 }

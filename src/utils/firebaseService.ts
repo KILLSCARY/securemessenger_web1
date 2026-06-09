@@ -164,7 +164,7 @@ export const saveMessage = async (chatId, message, sessionKey) => {
         const messagesRef = collection(db, 'chats', chatId, 'messages');
         const encrypted = await crypto.encryptMessage(message.text, key);
         
-        const messageDoc = {
+        const messageDoc: any = {
             senderId: message.senderId,
             senderName: message.senderName,
             encryptedText: encrypted.ciphertext,
@@ -173,14 +173,19 @@ export const saveMessage = async (chatId, message, sessionKey) => {
             reactions: [],
             readBy: [message.senderId]
         };
+
+        // Preserve file metadata so file messages display correctly
+        if (message.fileUrl) messageDoc.fileUrl = message.fileUrl;
+        if (message.fileType) messageDoc.fileType = message.fileType;
         
         await addDoc(messagesRef, messageDoc);
-        
+
+        // setDoc with merge works for both new (group) and existing (direct) chats
         const chatRef = doc(db, 'chats', chatId);
-        await updateDoc(chatRef, {
-            lastMessage: message.text.substring(0, 50),
+        await setDoc(chatRef, {
+            lastMessage: (message.fileUrl ? `[Файл] ${message.text?.replace('[File] ', '') || 'вложение'}` : message.text || '').substring(0, 50),
             lastMessageTime: serverTimestamp()
-        });
+        }, { merge: true });
     } catch (error) {
         console.error('Error saving message:', error);
     }
@@ -227,16 +232,21 @@ export const subscribeToMessages = (chatId, sessionKey, callback) => {
                 const data = docSnap.data();
                 let text = '[Encrypted]';
                 try {
-                    text = await decrypt({ ciphertext: data.encryptedText, iv: data.iv }, key);
+                    const decrypted = await decrypt({ ciphertext: data.encryptedText, iv: data.iv }, key);
+                    if (decrypted !== null && decrypted !== undefined && decrypted !== '') {
+                        text = decrypted;
+                    }
                 } catch (e) {
                     console.error('Decrypt error:', e);
                 }
-                
+
                 messages.push({
                     id: docSnap.id,
                     senderId: data.senderId,
                     senderName: data.senderName,
                     text,
+                    fileUrl: data.fileUrl || null,
+                    fileType: data.fileType || null,
                     timestamp: data.timestamp?.toDate(),
                     reactions: data.reactions || [],
                     readBy: data.readBy || []
@@ -256,22 +266,20 @@ export const subscribeToMessages = (chatId, sessionKey, callback) => {
 
 export const addReaction = async (chatId, messageId, userId, emoji) => {
     try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const q = query(messagesRef);
-        const snapshot = await getDocs(q);
-        const messageDoc = snapshot.docs.find(d => d.id === messageId);
-        
-        if (messageDoc) {
-            const reactions = messageDoc.data().reactions || [];
+        const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+        const messageSnap = await getDoc(messageRef);
+
+        if (messageSnap.exists()) {
+            const reactions = messageSnap.data().reactions || [];
             const existingIndex = reactions.findIndex(r => r.userId === userId && r.emoji === emoji);
-            
+
             if (existingIndex >= 0) {
                 reactions.splice(existingIndex, 1);
             } else {
                 reactions.push({ userId, emoji, timestamp: Date.now() });
             }
-            
-            await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), { reactions });
+
+            await updateDoc(messageRef, { reactions });
         }
     } catch (error) {
         console.error('Error adding reaction:', error);
@@ -355,16 +363,38 @@ export const getUserChats = async (userId) => {
 };
 
 export const getChatSessionKey = async (chatId: string, userId: string): Promise<string> => {
-    const keyData = sessionStorage.getItem(`chat_key_${chatId}`);
-    if (keyData) {
-        const parsed = JSON.parse(keyData);
-        return parsed.key;
+    const keyName = `chat_key_${chatId}`;
+
+    // 1. Check session storage first (fastest path, survives tab switches)
+    const cached = sessionStorage.getItem(keyName);
+    if (cached) {
+        return JSON.parse(cached).key;
     }
-    
+
+    // 2. Retrieve shared key from Firestore so both participants use the SAME key
+    try {
+        const chatKeyRef = doc(db, 'chatKeys', chatId);
+        const snapshot = await getDoc(chatKeyRef);
+        if (snapshot.exists() && snapshot.data()?.sharedKey) {
+            const sharedKey = snapshot.data().sharedKey as string;
+            sessionStorage.setItem(keyName, JSON.stringify({ key: sharedKey, createdAt: Date.now() }));
+            return sharedKey;
+        }
+    } catch (e) {
+        console.error('Error loading chat key from Firestore:', e);
+    }
+
+    // 3. First user to open this chat: generate key and persist it
     const newKey = generateRandomKey();
-    const storedData = { key: newKey, createdAt: Date.now() };
-    sessionStorage.setItem(`chat_key_${chatId}`, JSON.stringify(storedData));
-    
+    sessionStorage.setItem(keyName, JSON.stringify({ key: newKey, createdAt: Date.now() }));
+
+    try {
+        const chatKeyRef = doc(db, 'chatKeys', chatId);
+        await setDoc(chatKeyRef, { sharedKey: newKey }, { merge: true });
+    } catch (e) {
+        console.error('Error saving chat key to Firestore:', e);
+    }
+
     return newKey;
 };
 
