@@ -73,21 +73,29 @@ input  { font-family: inherit; }
     flex: 1; overflow-y: auto;
     display: flex; flex-direction: column; align-items: center;
     justify-content: center;
-    padding: 48px 24px calc(40px + env(safe-area-inset-bottom, 0px));
+    padding: 0 24px calc(40px + env(safe-area-inset-bottom, 0px));
     position: relative; gap: 20px;
 }
 .auth-glow1 { display: none; }
 .auth-glow2 { display: none; }
 
-/* Hero: transparent PNG banner, no blend mode needed */
+/* Hero: full JPEG, fade bottom edge into app background */
 .auth-hero {
+    position: relative;
     width: calc(100% + 48px);
     margin-left: -24px;
-    margin-top: -8px;
+    margin-top: -48px;
 }
 .auth-banner-img {
     width: 100%;
     display: block;
+}
+.auth-hero-fade {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 50%;
+    background: linear-gradient(to bottom, transparent, #080809);
+    pointer-events: none;
 }
 
 .auth-sub { color: var(--sub); font-size: 15px; width: 100%; text-align: center; }

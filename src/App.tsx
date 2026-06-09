@@ -409,7 +409,8 @@ function App() {
                 <div className="auth-glow1" /><div className="auth-glow2" />
 
                 <div className="auth-hero">
-                    <img className="auth-banner-img" src="/nss-banner.png" alt="НЕ СУЩИЙ СВЕТ" />
+                    <img className="auth-banner-img" src="/nss-banner.jpg" alt="НЕ СУЩИЙ СВЕТ" />
+                    <div className="auth-hero-fade" />
                 </div>
                 <p className="auth-sub">Клуб. Курсы. Общение.</p>
 
