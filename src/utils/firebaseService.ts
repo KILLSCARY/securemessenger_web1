@@ -101,15 +101,18 @@ export const updateUserProfile = async (userId: string, updates: any) => {
     }
 };
 
-// Real-time online users — no polling needed
+// Real-time online users with 5-minute staleness check
 export const subscribeToOnlineUsers = (currentUserId: string, callback: (users: any[]) => void) => {
     const q = query(collection(db, 'users'), where('status', '==', 'online'));
     return onSnapshot(q, (snapshot) => {
+        const cutoff = Date.now() - 5 * 60 * 1000;
         const seen = new Set<string>();
         const users = snapshot.docs
             .map(d => ({ id: d.id, ...d.data() }))
             .filter((u: any) => {
                 if (!u.userId || u.userId === currentUserId || seen.has(u.userId)) return false;
+                const ls = u.lastSeen?.toDate?.()?.getTime?.() ?? 0;
+                if (ls < cutoff) return false; // stale
                 seen.add(u.userId);
                 return true;
             });
@@ -190,8 +193,9 @@ export const addReaction = async (chatId: string, messageId: string, userId: str
 };
 
 // ── Chats ─────────────────────────────────────────────────────────
-export const createChat = async (user1Id: string, user2Id: string) => {
-    const chatId = [user1Id, user2Id].sort().join('_');
+
+// ensureChatExists: creates the chat doc with participants ONLY if it doesn't exist
+export const ensureChatExists = async (chatId: string, user1Id: string, user2Id: string): Promise<void> => {
     try {
         const chatRef = doc(db, 'chats', chatId);
         const existing = await getDoc(chatRef);
@@ -203,22 +207,28 @@ export const createChat = async (user1Id: string, user2Id: string) => {
                 lastMessageTime: serverTimestamp(),
                 createdAt: serverTimestamp(),
             });
-            await setDoc(doc(db, 'chatKeys', chatId), { chatId, createdAt: serverTimestamp() }, { merge: true });
         }
-        return chatId;
     } catch (error) {
-        console.error('Error creating chat:', error);
-        return chatId;
+        console.error('Error ensuring chat exists:', error);
     }
 };
 
+export const createChat = async (user1Id: string, user2Id: string) => {
+    const chatId = [user1Id, user2Id].sort().join('_');
+    await ensureChatExists(chatId, user1Id, user2Id);
+    return chatId;
+};
+
 // Real-time chat list — no orderBy so no composite index required; sorted in JS
+// Only shows chats that have at least one message (filters empty chats)
 export const subscribeToChats = (userId: string, callback: (chats: any[]) => void) => {
     const q = query(collection(db, 'chats'), where('participants', 'array-contains', userId));
     return onSnapshot(q, async (snapshot) => {
         const chats: any[] = [];
         for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
+            // Skip empty chats (no messages yet) — prevents "Нет сообщений" noise
+            if (!data.lastMessage && !data.lastMessageTime) continue;
             const chatId = data.chatId || docSnap.id;
             const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
             const partner = partnerId ? await getUserProfile(partnerId) : null;
@@ -240,27 +250,55 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
     });
 };
 
-// ── Session Key ───────────────────────────────────────────────────
-export const getChatSessionKey = async (chatId: string, userId: string): Promise<string> => {
-    const keyName = `chat_key_${chatId}`;
-    const cached = sessionStorage.getItem(keyName);
-    if (cached) return JSON.parse(cached).key;
+// ── Session Key (ECDH-based) ──────────────────────────────────────
+export const getChatSessionKey = async (chatId: string, userId: string, partnerId?: string): Promise<string> => {
+    const keyName = `nss_chatkey_${chatId}`;
+    // Use localStorage (not sessionStorage) so key persists across sessions
+    const cached = localStorage.getItem(keyName);
+    if (cached) return cached;
 
+    let key: string;
+
+    if (partnerId && !chatId.startsWith('city_')) {
+        // Private chat: try ECDH derivation
+        try {
+            const snap = await getDoc(doc(db, 'users', partnerId));
+            if (snap.exists() && snap.data()?.ecdhPublicKey) {
+                const { deriveChatKey } = await import('./e2e');
+                key = await deriveChatKey(userId, snap.data().ecdhPublicKey);
+                localStorage.setItem(keyName, key);
+                return key;
+            }
+        } catch (e) {
+            console.warn('ECDH derivation failed, using legacy key:', e);
+        }
+    }
+
+    if (chatId.startsWith('city_')) {
+        // Group chat: deterministic key from chatId
+        const { deterministicGroupKey } = await import('./e2e');
+        key = await deterministicGroupKey(chatId);
+        localStorage.setItem(keyName, key);
+        return key;
+    }
+
+    // Legacy fallback: check Firestore for old key
     try {
         const snapshot = await getDoc(doc(db, 'chatKeys', chatId));
         if (snapshot.exists() && snapshot.data()?.sharedKey) {
-            const key = snapshot.data().sharedKey as string;
-            sessionStorage.setItem(keyName, JSON.stringify({ key, createdAt: Date.now() }));
+            key = snapshot.data().sharedKey as string;
+            localStorage.setItem(keyName, key);
             return key;
         }
-    } catch (e) { console.error('Error loading chat key:', e); }
+    } catch (e) { /* ignore */ }
 
-    const newKey = generateRandomKey();
-    sessionStorage.setItem(keyName, JSON.stringify({ key: newKey, createdAt: Date.now() }));
+    // Generate new random key for this chat
+    key = generateRandomKey();
+    localStorage.setItem(keyName, key);
     try {
-        await setDoc(doc(db, 'chatKeys', chatId), { sharedKey: newKey }, { merge: true });
-    } catch (e) { console.error('Error saving chat key:', e); }
-    return newKey;
+        await setDoc(doc(db, 'chatKeys', chatId), { sharedKey: key }, { merge: true });
+    } catch (e) { /* ignore */ }
+    return key;
 };
 
 function generateRandomKey() {

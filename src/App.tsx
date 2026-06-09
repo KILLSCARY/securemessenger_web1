@@ -9,9 +9,10 @@ import {
     createUserProfile, getUserProfile, updateUserProfile,
     subscribeToMessages, saveMessage, addReaction,
     uploadAvatar, getChatSessionKey, setTypingStatus,
-    subscribeToTyping, subscribeToChats, createChat,
+    subscribeToTyping, subscribeToChats, ensureChatExists,
     subscribeToOnlineUsers, uploadFile
 } from './utils/firebaseService';
+import { initECDHKeys } from './utils/e2e';
 import './App.css';
 
 // ── Error Boundary ────────────────────────────────────────────────
@@ -49,6 +50,45 @@ const COURSES = [
     { title: 'Финансы бизнеса', lessons: 15, icon: '💰', color: '#10B981', desc: 'Планирование и масштабирование' },
     { title: 'Переговоры', lessons: 20, icon: '🤝', color: '#EF4444', desc: 'Психология и техники влияния' },
 ];
+
+// ── AudioPlayer ───────────────────────────────────────────────────
+function AudioPlayer({ url, label, isMe }: { url: string; label?: string; isMe: boolean }) {
+    const [playing, setPlaying] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const audioRef = useRef<HTMLAudioElement>(null);
+
+    const toggle = () => {
+        const a = audioRef.current;
+        if (!a) return;
+        if (playing) { a.pause(); } else { a.play(); }
+        setPlaying(!playing);
+    };
+
+    return (
+        <div className={`voice-msg ${isMe ? 'voice-me' : 'voice-them'}`}>
+            <audio ref={audioRef}
+                src={url}
+                onEnded={() => { setPlaying(false); setProgress(0); }}
+                onTimeUpdate={e => {
+                    const a = e.currentTarget;
+                    if (a.duration) setProgress(a.currentTime / a.duration);
+                }}
+            />
+            <button className="voice-play" onClick={toggle}>{playing ? '⏸' : '▶'}</button>
+            <div className="voice-body">
+                <div className="voice-wave">
+                    {Array.from({length: 20}, (_, i) => (
+                        <div key={i} className="voice-bar" style={{
+                            height: `${20 + Math.sin(i * 0.8) * 10 + Math.cos(i * 1.3) * 8}px`,
+                            opacity: i / 20 <= progress ? 1 : 0.3
+                        }} />
+                    ))}
+                </div>
+                <span className="voice-label">{label || 'Голосовое'}</span>
+            </div>
+        </div>
+    );
+}
 
 // ── Avatar ────────────────────────────────────────────────────────
 function Ava({ src = '', name = '?', size = 48, online = false, color = '#EAB308' }: {
@@ -108,10 +148,17 @@ function App() {
     const [editUsername, setEditUsername] = useState('');
     const [editBio, setEditBio] = useState('');
 
+    // Voice recording state
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordDuration, setRecordDuration] = useState(0);
+
     const fileRef = useRef<any>(null);
     const avaRef = useRef<any>(null);
     const endRef = useRef<any>(null);
     const typingTimer = useRef<any>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const recordTimerRef = useRef<any>(null);
 
     // Auth
     useEffect(() => {
@@ -124,7 +171,14 @@ function App() {
                     p = await createUserProfile(fu.uid, n, fu.email!);
                     sessionStorage.removeItem('temp_username');
                 }
-                await updateUserProfile(fu.uid, { status: 'online' });
+                // Init ECDH keys and store public key in profile
+                try {
+                    const publicKeyJwk = await initECDHKeys(fu.uid);
+                    await updateUserProfile(fu.uid, { status: 'online', ecdhPublicKey: publicKeyJwk });
+                } catch (e) {
+                    console.warn('ECDH init failed:', e);
+                    await updateUserProfile(fu.uid, { status: 'online' });
+                }
                 setProfile(p);
             } else {
                 setUser(null); setProfile(null);
@@ -203,8 +257,9 @@ function App() {
 
     const startChat = async (pid: string, pname: string, pava: any = null) => {
         const isGroup = pid.startsWith('__group_');
-        const cid = isGroup ? pid.replace('__group_', '') : await createChat(user.uid, pid);
-        const key = await getChatSessionKey(cid, user.uid);
+        // Compute chatId without creating the Firestore doc — doc is created lazily on first send
+        const cid = isGroup ? pid.replace('__group_', '') : [user.uid, pid].sort().join('_');
+        const key = await getChatSessionKey(cid, user.uid, isGroup ? undefined : pid);
         setChatId(cid);
         setSessionKey(key);
         setPartner({ userId: pid, username: pname, avatar: pava });
@@ -221,6 +276,10 @@ function App() {
         setSendErr('');
         try {
             await setTypingStatus(chatId, user.uid, false);
+            // Ensure chat doc exists before first message (non-group chats)
+            if (partner && !chatId.startsWith('city_')) {
+                await ensureChatExists(chatId, user.uid, partner.userId);
+            }
             if (selFile) {
                 await saveMessage(chatId, {
                     id: generateMessageId(), text: `[File] ${selFile.name}`,
@@ -268,6 +327,69 @@ function App() {
                 console.error('File upload error:', e);
             }
         }
+    };
+
+    // Voice recording
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+            const mr = new MediaRecorder(stream, { mimeType });
+            audioChunksRef.current = [];
+            mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+            mr.start(100);
+            mediaRecorderRef.current = mr;
+            setIsRecording(true);
+            setRecordDuration(0);
+            recordTimerRef.current = setInterval(() => setRecordDuration(d => d + 1), 1000);
+        } catch (e) {
+            setSendErr('Нет доступа к микрофону');
+        }
+    };
+
+    const stopRecording = async (doSend: boolean) => {
+        if (!mediaRecorderRef.current) return;
+        clearInterval(recordTimerRef.current);
+        setIsRecording(false);
+
+        if (!doSend) {
+            mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+            mediaRecorderRef.current = null;
+            setRecordDuration(0);
+            return;
+        }
+
+        const currentDuration = recordDuration;
+        await new Promise<void>(resolve => {
+            mediaRecorderRef.current!.onstop = () => resolve();
+            mediaRecorderRef.current!.stop();
+            mediaRecorderRef.current!.stream?.getTracks().forEach(t => t.stop());
+        });
+
+        const mimeType = audioChunksRef.current[0]?.type || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+        const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: mimeType });
+
+        try {
+            if (partner && !chatId!.startsWith('city_')) {
+                await ensureChatExists(chatId!, user.uid, partner.userId);
+            }
+            const result = await uploadFile(chatId!, file, user.uid);
+            await saveMessage(chatId!, {
+                id: generateMessageId(),
+                text: '',
+                senderId: user.uid,
+                senderName: profile?.username || user.email,
+                fileUrl: result.url,
+                fileType: 'audio/voice',
+                fileName: `Голосовое • ${currentDuration}с`,
+            }, sessionKey!);
+        } catch (e) {
+            setSendErr('Ошибка отправки голосового');
+        }
+        setRecordDuration(0);
+        mediaRecorderRef.current = null;
     };
 
     // ── Loading ───────────────────────────────────────────────────
@@ -331,7 +453,9 @@ function App() {
                             </div>
                             <div className="profile-sheet-name">{partner.username}</div>
                             <div className="profile-sheet-sub">@{(partner.username || 'user').toLowerCase().replace(/\s/g, '')}</div>
-                            <div className="profile-sheet-status">● онлайн</div>
+                            <div className="profile-sheet-status">
+                                {online.some((u: any) => u.userId === partner.userId) ? '● онлайн' : 'последний раз в сети...'}
+                            </div>
                             <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setViewPartner(false)}>
                                 Написать
                             </button>
@@ -344,11 +468,13 @@ function App() {
                         <div key={msg.id} className={`msg-row ${msg.senderId === user.uid ? 'msg-me' : 'msg-them'}`}
                             onContextMenu={e => { e.preventDefault(); setReactionFor(msg.id); }}>
                             <div className={`bubble ${msg.senderId === user.uid ? 'bubble-me' : 'bubble-them'}`}>
-                                {msg.fileUrl && msg.fileType?.startsWith('image/')
-                                    ? <img src={msg.fileUrl} alt="" className="msg-img" />
-                                    : msg.fileUrl
-                                        ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
-                                        : null
+                                {msg.fileUrl && msg.fileType === 'audio/voice'
+                                    ? <AudioPlayer url={msg.fileUrl} label={msg.fileName} isMe={msg.senderId === user.uid} />
+                                    : msg.fileUrl && msg.fileType?.startsWith('image/')
+                                        ? <img src={msg.fileUrl} alt="" className="msg-img" />
+                                        : msg.fileUrl
+                                            ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
+                                            : null
                                 }
                                 {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
                                 <span className="bubble-time">
@@ -386,7 +512,26 @@ function App() {
                 <div className="composer">
                     <button className="composer-btn" onClick={() => fileRef.current?.click()}>📎</button>
                     <input type="file" ref={fileRef} accept="image/*,video/*,.pdf,.doc,.docx" style={{ display: 'none' }} onChange={e => handleFile(e, 'chat')} />
-                    <button className="composer-btn" onClick={() => setShowEmoji(v => !v)}>😊</button>
+
+                    {isRecording ? (
+                        <div className="recording-indicator">
+                            <div className="rec-dot" />
+                            <span className="rec-time">{Math.floor(recordDuration/60).toString().padStart(2,'0')}:{(recordDuration%60).toString().padStart(2,'0')}</span>
+                            <button className="composer-btn rec-cancel" onClick={() => stopRecording(false)}>✕</button>
+                        </div>
+                    ) : (
+                        <>
+                            <button className="composer-btn" onClick={() => setShowEmoji(v => !v)}>😊</button>
+                            <button
+                                className="composer-btn"
+                                onMouseDown={startRecording}
+                                onTouchStart={e => { e.preventDefault(); startRecording(); }}
+                                onMouseUp={() => stopRecording(true)}
+                                onTouchEnd={e => { e.preventDefault(); stopRecording(true); }}
+                            >🎤</button>
+                        </>
+                    )}
+
                     {selFile && (
                         <div className="file-chip">
                             <span>{selFile.name}</span>
@@ -525,6 +670,11 @@ function App() {
                             <h2 className="profile-name">{profile?.username || user.email}</h2>
                             <p className="profile-handle">@{(profile?.username || 'user').toLowerCase().replace(/\s/g, '')}</p>
                             {profile?.bio && <p className="profile-bio">{profile.bio}</p>}
+                            {profile?.createdAt && (
+                                <p className="profile-registered">
+                                    Зарегистрирован: {new Date(profile.createdAt?.toDate?.() || profile.createdAt).toLocaleDateString('ru-RU')}
+                                </p>
+                            )}
                             <button className="btn-secondary" style={{ marginTop: 10 }} onClick={() => {
                                 setEditUsername(profile?.username || '');
                                 setEditBio(profile?.bio || '');
@@ -561,7 +711,7 @@ function App() {
 
                         {editProfile && (
                             <div className="profile-overlay" onClick={() => setEditProfile(false)}>
-                                <div className="profile-sheet" onClick={e => e.stopPropagation()}>
+                                <div className="profile-sheet edit-profile-sheet" onClick={e => e.stopPropagation()}>
                                     <div className="profile-sheet-name" style={{ marginBottom: 16 }}>Редактировать профиль</div>
                                     <input className="nss-input" placeholder="Имя" value={editUsername}
                                         onChange={e => setEditUsername(e.target.value)} />
