@@ -380,15 +380,15 @@ function App() {
                     <div className="logo-wrap">
                         <div className="logo-outer">
                             <div className="logo-inner">
-                                <span className="logo-mark">L</span>
+                                <span className="logo-mark">N</span>
                             </div>
                         </div>
                     </div>
 
-                    <div className="brand">LAVASYNC</div>
-                    <h1 className="hero-title">Private chats.<br/>Fast sync.<br/>Clean energy.</h1>
+                    <div className="brand">NSS</div>
+                    <h1 className="hero-title">Твой клуб.<br/>Курсы.<br/>Общение.</h1>
                     <p className="hero-subtitle">
-                        E2E encrypted messenger with premium design: fast chats, calls, statuses, private dialogues.
+                        Закрытое сообщество с курсами, чатами по городам и общением с единомышленниками.
                     </p>
 
                     <div className="feature-row">
@@ -408,9 +408,9 @@ function App() {
                     </div>
 
                     <div className="auth-container">
-                        <h2 className="auth-title">LAVASYNC Access</h2>
+                        <h2 className="auth-title">NSS</h2>
                         <p className="auth-subtitle">
-                            Minimalistic. Premium. No basement vibes.
+                            Вход в закрытый клуб
                         </p>
 
                         <div className="switcher">
@@ -466,7 +466,7 @@ function App() {
 
                             <div className="primary-button" onClick={handleAuth}>
                                 <span className="primary-button-text">
-                                    {isLogin ? 'Войти в LAVASYNC' : 'Создать аккаунт'}
+                                    {isLogin ? 'Войти в NSS' : 'Создать аккаунт'}
                                 </span>
                             </div>
 
@@ -639,7 +639,7 @@ function App() {
                     <div className="screen">
                         <div className="screen-header">
                             <div>
-                                <div className="screen-eyebrow">LAVASYNC</div>
+                                <div className="screen-eyebrow">NSS</div>
                                 <h1 className="screen-title">
                                     {activeTab === 'chats' ? 'Сообщения' : activeTab === 'courses' ? 'Курсы' : 'Профиль'}
                                 </h1>

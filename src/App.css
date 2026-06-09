@@ -23,19 +23,23 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    min-height: 100dvh;
+    /* Prevent iOS bounce scroll */
+    overscroll-behavior: none;
 }
 
 .app {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100dvh;
     width: 100%;
     max-width: 480px;
     margin: 0 auto;
     position: relative;
     background: var(--bg);
     overflow: hidden;
+    /* Extend behind iOS status bar and home indicator */
+    padding-top: env(safe-area-inset-top, 0px);
 }
 
 @media (min-width: 481px) {
@@ -48,7 +52,10 @@ body {
 .screen {
     flex: 1;
     overflow-y: auto;
-    padding-bottom: 100px;
+    /* tab bar height (72px) + gap (12px) + safe area */
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    /* Smooth scroll on iOS */
+    -webkit-overflow-scrolling: touch;
 }
 
 .loading-screen {
@@ -56,7 +63,7 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100vh;
+    height: 100dvh;
     gap: 16px;
 }
 
@@ -409,7 +416,7 @@ body {
 }
 
 .chat-list {
-    padding: 0 16px 120px;
+    padding: 0 16px;
 }
 
 .chat-card {
@@ -607,7 +614,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding-bottom: 90px;
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
 }
 
 .message-row {
@@ -659,7 +667,7 @@ body {
     position: absolute;
     left: 12px;
     right: 12px;
-    bottom: 18px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     display: flex;
     align-items: center;
     gap: 10px;
@@ -719,7 +727,7 @@ body {
 }
 
 .profile-wrap {
-    padding-bottom: 120px;
+    padding-bottom: 0;
 }
 
 .profile-hero {
@@ -854,7 +862,7 @@ body {
     position: absolute;
     left: 16px;
     right: 16px;
-    bottom: 18px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     height: 72px;
     border-radius: 24px;
     background: var(--card);
@@ -863,6 +871,8 @@ body {
     align-items: center;
     justify-content: space-around;
     padding: 0 16px;
+    /* Prevent tap highlight on iOS */
+    -webkit-tap-highlight-color: transparent;
 }
 
 .tab-item {
@@ -1152,15 +1162,17 @@ body {
     }
 }
 
-/* Safe Area Support */
-@supports (padding: env(safe-area-inset-bottom)) {
-    .tab-bar {
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-    
-    .composer-wrap {
-        padding-bottom: calc(18px + env(safe-area-inset-bottom));
-    }
+/* Prevent content from going under iOS home indicator */
+.chat-list {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+
+.profile-wrap {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+
+.courses-wrap {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Touch Optimization */

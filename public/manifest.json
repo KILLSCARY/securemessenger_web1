@@ -1,11 +1,11 @@
 {
-  "name": "LavaMessenger",
-  "short_name": "LavaChat",
-  "description": "E2E Encrypted Messenger",
+  "name": "NSS",
+  "short_name": "NSS",
+  "description": "NSS — Клуб. Курсы. Общение.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#6366f1",
+  "background_color": "#0A0B10",
+  "theme_color": "#0A0B10",
   "orientation": "portrait-primary",
   "icons": [
     {
