@@ -91,8 +91,7 @@ export const getUserProfile = async (userId) => {
 
 export const updateUserProfile = async (userId, updates) => {
     try {
-        // Always include userId so the online-users deduplication keeps this entry
-        await setDoc(doc(db, 'users', userId), { userId, ...updates }, { merge: true });
+        await setDoc(doc(db, 'users', userId), { userId, lastSeen: serverTimestamp(), ...updates }, { merge: true });
     } catch (error) {
         console.error('Error updating profile:', error);
     }
@@ -104,10 +103,12 @@ export const getOnlineUsers = async () => {
         const q = query(usersRef, where('status', '==', 'online'));
         const snapshot = await getDocs(q);
         const users = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        // Deduplicate by userId (old addDoc approach could create multiple docs per user)
+        const cutoff = Date.now() - 5 * 60 * 1000;
         const seen = new Set<string>();
-        return users.filter(u => {
+        return users.filter((u: any) => {
             if (!u.userId || seen.has(u.userId)) return false;
+            const ls = u.lastSeen?.toDate?.()?.getTime?.() ?? Date.now();
+            if (ls < cutoff) return false;
             seen.add(u.userId);
             return true;
         });
@@ -130,13 +131,14 @@ export const saveMessage = async (chatId, message, sessionKey) => {
         reactions: [],
         readBy: [message.senderId]
     };
-    if (message.fileUrl) messageDoc.fileUrl = message.fileUrl;
+    if (message.fileUrl)  messageDoc.fileUrl  = message.fileUrl;
     if (message.fileType) messageDoc.fileType = message.fileType;
+    if (message.fileName) messageDoc.fileName = message.fileName;
 
     await addDoc(collection(db, 'chats', chatId, 'messages'), messageDoc);
 
     await setDoc(doc(db, 'chats', chatId), {
-        lastMessage: (message.fileUrl ? '[Файл]' : (message.text || '')).substring(0, 50),
+        lastMessage: message.fileUrl ? `📎 ${message.fileName || 'Файл'}` : (message.text || '').substring(0, 60),
         lastMessageTime: serverTimestamp()
     }, { merge: true });
 };
@@ -161,6 +163,7 @@ export const subscribeToMessages = (chatId: string, sessionKey: string, callback
                 text,
                 fileUrl: data.fileUrl ?? null,
                 fileType: data.fileType ?? null,
+                fileName: data.fileName ?? null,
                 timestamp: data.timestamp?.toDate(),
                 reactions: data.reactions ?? [],
                 readBy: data.readBy ?? [],
@@ -196,33 +199,24 @@ export const addReaction = async (chatId, messageId, userId, emoji) => {
 };
 
 export const createChat = async (user1Id, user2Id) => {
+    const chatId = [user1Id, user2Id].sort().join('_');
     try {
-        const chatsRef = collection(db, 'chats');
-        const chatId = [user1Id, user2Id].sort().join('_');
-        
-        const q = query(chatsRef, where('chatId', '==', chatId), limit(1));
-        const existing = await getDocs(q);
-        
-        if (existing.empty) {
-            await addDoc(chatsRef, {
+        const chatRef = doc(db, 'chats', chatId);
+        const existing = await getDoc(chatRef);
+        if (!existing.exists()) {
+            await setDoc(chatRef, {
                 chatId,
                 participants: [user1Id, user2Id],
                 lastMessage: null,
                 lastMessageTime: serverTimestamp(),
                 createdAt: serverTimestamp()
             });
-            
-            await setDoc(doc(db, 'chatKeys', chatId), {
-                chatId,
-                participants: {},
-                createdAt: serverTimestamp()
-            });
+            await setDoc(doc(db, 'chatKeys', chatId), { chatId, createdAt: serverTimestamp() }, { merge: true });
         }
-        
         return chatId;
     } catch (error) {
         console.error('Error creating chat:', error);
-        return `${user1Id}_${user2Id}`.split('_').sort().join('_');
+        return chatId;
     }
 };
 
@@ -306,14 +300,6 @@ function generateRandomKey() {
     return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function hexToArrayBuffer(hex) {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return bytes.buffer;
-}
-
 export const uploadAvatar = async (userId, file) => {
     try {
         const avatarRef = ref(storage, `avatars/${userId}`);
@@ -328,20 +314,12 @@ export const uploadAvatar = async (userId, file) => {
 };
 
 export const uploadFile = async (chatId, file, senderId) => {
-    try {
-        const timestamp = Date.now();
-        const extension = file.name.split('.').pop();
-        const fileName = `${chatId}_${timestamp}.${extension}`;
-        const fileRef = ref(storage, `files/${fileName}`);
-        
-        await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
-        
-        return url;
-    } catch (error) {
-        console.error('Error uploading file:', error);
-        return null;
-    }
+    const ext = file.name.split('.').pop() || 'bin';
+    const path = `files/${chatId}/${senderId}_${Date.now()}.${ext}`;
+    const fileRef = ref(storage, path);
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+    return { url, name: file.name, type: file.type };
 };
 
 export const uploadStatus = async (userId, file, type = 'image') => {
@@ -427,16 +405,3 @@ export const subscribeToTyping = (chatId, userId, callback) => {
     }
 };
 
-export const searchMessages = async (chatId, searchTerm) => {
-    try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const snapshot = await getDocs(messagesRef);
-        
-        return snapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() }))
-            .filter(m => m.senderName.toLowerCase().includes(searchTerm.toLowerCase()));
-    } catch (error) {
-        console.error('Error searching messages:', error);
-        return [];
-    }
-};

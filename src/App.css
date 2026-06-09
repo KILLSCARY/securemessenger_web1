@@ -332,6 +332,16 @@ input  { font-family: inherit; }
 .profile-sheet-sub { font-size: 14px; color: var(--sub); }
 .profile-sheet-status { font-size: 13px; color: var(--success); margin-top: 4px; }
 .chat-header-ava-btn { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.profile-bio {
+    font-size: 14px; color: var(--sub); text-align: center;
+    padding: 0 24px; margin-top: 4px;
+}
+.btn-secondary {
+    padding: 8px 20px; border-radius: 20px; font-size: 13px; font-weight: 700;
+    color: var(--accent); border: 1px solid var(--accent); background: transparent;
+    -webkit-tap-highlight-color: transparent;
+}
+.btn-secondary:active { opacity: .7; }
 .send-err {
     text-align: center; font-size: 12px; color: var(--danger);
     padding: 4px 16px; background: rgba(255,92,122,0.1);

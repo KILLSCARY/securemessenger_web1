@@ -102,6 +102,9 @@ function App() {
     const [cityOpen, setCityOpen] = useState(true);
     const [viewPartner, setViewPartner] = useState(false);
     const [sendErr, setSendErr] = useState('');
+    const [editProfile, setEditProfile] = useState(false);
+    const [editUsername, setEditUsername] = useState('');
+    const [editBio, setEditBio] = useState('');
 
     const fileRef = useRef<any>(null);
     const avaRef = useRef<any>(null);
@@ -164,6 +167,13 @@ function App() {
         return () => clearInterval(iv);
     }, [user, loadChats]);
 
+    // Auto-clear send error
+    useEffect(() => {
+        if (!sendErr) return;
+        const t = setTimeout(() => setSendErr(''), 3000);
+        return () => clearTimeout(t);
+    }, [sendErr]);
+
     // Typing
     useEffect(() => {
         if (!chatId || !user) { setTyping([]); return; }
@@ -219,7 +229,7 @@ function App() {
                 await saveMessage(chatId, {
                     id: generateMessageId(), text: `[File] ${selFile.name}`,
                     senderId: user.uid, senderName: profile?.username || user.email,
-                    fileUrl: selFile.url, fileType: selFile.type,
+                    fileUrl: selFile.url, fileType: selFile.type, fileName: selFile.name,
                 }, sessionKey);
                 setSelFile(null);
             }
@@ -254,8 +264,13 @@ function App() {
                 await updateUserProfile(user.uid, { avatar: url });
             }
         } else {
-            const url = await uploadFile(chatId, f, user.uid);
-            if (url) setSelFile({ name: f.name, url, type: f.type });
+            try {
+                const result = await uploadFile(chatId!, f, user.uid);
+                setSelFile({ name: result.name, url: result.url, type: result.type });
+            } catch (e: any) {
+                setSendErr('Ошибка загрузки файла');
+                console.error('File upload error:', e);
+            }
         }
     };
 
@@ -336,7 +351,7 @@ function App() {
                                 {msg.fileUrl && msg.fileType?.startsWith('image/')
                                     ? <img src={msg.fileUrl} alt="" className="msg-img" />
                                     : msg.fileUrl
-                                        ? <div className="msg-file-chip">📎 {msg.text?.replace('[File] ', '')}</div>
+                                        ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
                                         : null
                                 }
                                 {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
@@ -513,6 +528,12 @@ function App() {
                             <input type="file" ref={avaRef} accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'avatar')} />
                             <h2 className="profile-name">{profile?.username || user.email}</h2>
                             <p className="profile-handle">@{(profile?.username || 'user').toLowerCase().replace(/\s/g, '')}</p>
+                            {profile?.bio && <p className="profile-bio">{profile.bio}</p>}
+                            <button className="btn-secondary" style={{ marginTop: 10 }} onClick={() => {
+                                setEditUsername(profile?.username || '');
+                                setEditBio(profile?.bio || '');
+                                setEditProfile(true);
+                            }}>Редактировать профиль</button>
                             <div className="profile-stats">
                                 <div className="stat"><div className="stat-val">{chats.length}</div><div className="stat-lbl">Чаты</div></div>
                                 <div className="stat"><div className="stat-val">5</div><div className="stat-lbl">Курсы</div></div>
@@ -541,6 +562,23 @@ function App() {
                                 <IcoArrow />
                             </div>
                         </div>
+
+                        {editProfile && (
+                            <div className="profile-overlay" onClick={() => setEditProfile(false)}>
+                                <div className="profile-sheet" onClick={e => e.stopPropagation()}>
+                                    <div className="profile-sheet-name" style={{ marginBottom: 16 }}>Редактировать профиль</div>
+                                    <input className="nss-input" placeholder="Имя" value={editUsername}
+                                        onChange={e => setEditUsername(e.target.value)} />
+                                    <input className="nss-input" placeholder="О себе" value={editBio}
+                                        onChange={e => setEditBio(e.target.value)} style={{ marginTop: 10 }} />
+                                    <button className="btn-primary" style={{ marginTop: 16 }} onClick={async () => {
+                                        await updateUserProfile(user.uid, { username: editUsername, bio: editBio });
+                                        setProfile((p: any) => ({ ...p, username: editUsername, bio: editBio }));
+                                        setEditProfile(false);
+                                    }}>Сохранить</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
