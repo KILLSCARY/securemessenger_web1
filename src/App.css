@@ -533,39 +533,39 @@ input  { font-family: inherit; }
     padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
 }
 
-/* ── Logo glow — bigger radius, no clipping ─────────────────────── */
+/* ── Auth hero: glowing text НЕ СУЩИЙ СВЕТ ──────────────────────── */
 .auth-hero {
-    overflow: visible !important;
-    padding: 20px 0;
+    width: 100%;
+    padding: 20px 0 10px;
+    display: flex; justify-content: center;
 }
-.auth-banner-img {
-    filter: drop-shadow(0 0 35px rgba(234,179,8,.9))
-            drop-shadow(0 0 80px rgba(234,179,8,.55))
-            drop-shadow(0 0 140px rgba(234,179,8,.25)) !important;
+.auth-nss-title {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 0; line-height: 1;
+}
+.auth-nss-title span {
+    font-size: 56px; font-weight: 900;
+    color: var(--accent);
+    letter-spacing: 2px; line-height: 1.05;
+    text-shadow:
+        0 0 20px rgba(234,179,8,1),
+        0 0 50px rgba(234,179,8,.7),
+        0 0 100px rgba(234,179,8,.4);
 }
 
-/* ── Auth social icons ───────────────────────────────────────────── */
-.auth-divider {
-    display: flex; align-items: center; gap: 12px;
-    margin: 16px 0 12px; color: var(--sub); font-size: 13px;
+/* ── Auth nav preview icons (gold) ──────────────────────────────── */
+.auth-nav-preview {
+    display: flex; width: 100%; justify-content: space-around;
+    padding: 16px 0 4px;
+    border-top: 1px solid var(--border);
 }
-.auth-divider::before, .auth-divider::after {
-    content: ''; flex: 1; height: 1px; background: var(--border);
-}
-.auth-socials {
-    display: flex; justify-content: center; gap: 16px;
-}
-.auth-social-btn {
-    width: 52px; height: 52px;
-    border-radius: 16px;
-    background: var(--card2);
-    border: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: center;
+.auth-nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
     color: var(--accent);
-    transition: background .15s, transform .1s;
+    opacity: 0.85;
 }
-.auth-social-btn svg { width: 24px; height: 24px; }
-.auth-social-btn:active { background: var(--border); transform: scale(.94); }
+.auth-nav-item span:first-child { font-size: 26px; }
 
 /* ── Notifications ───────────────────────────────────────────────── */
 .notif-row {
