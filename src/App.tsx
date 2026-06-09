@@ -407,11 +407,19 @@ function App() {
         <div className="app">
             <div className="auth-wrap">
                 <div className="auth-glow1" /><div className="auth-glow2" />
-                <div className="auth-top">
-                    <div className="logo-circle"><img src="/nss-icon.png" alt="NSS" /></div>
-                    <h1 className="auth-brand">Не Сущий Свет</h1>
-                    <p className="auth-sub">Клуб. Курсы. Общение.</p>
+
+                <div className="auth-hero">
+                    <div className="auth-logo-big">
+                        <img src="/nss-icon.png" alt="NSS" />
+                    </div>
+                    <div className="auth-title-stack">
+                        <span className="auth-title-line">НЕ</span>
+                        <span className="auth-title-line">СУЩИЙ</span>
+                        <span className="auth-title-line">СВЕТ</span>
+                    </div>
                 </div>
+                <p className="auth-sub">Клуб. Курсы. Общение.</p>
+
                 <div className="auth-box">
                     <div className="auth-tabs">
                         <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
@@ -425,6 +433,24 @@ function App() {
                         onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} />
                     {authErr && <p className="auth-err">{authErr}</p>}
                     <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
+                </div>
+
+                <div className="auth-features">
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">👥</span>
+                        <span className="auth-feat-title">Сообщество</span>
+                        <span className="auth-feat-desc">Единомышленники рядом</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">📚</span>
+                        <span className="auth-feat-title">Знания</span>
+                        <span className="auth-feat-desc">Курсы и материалы для роста</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">💬</span>
+                        <span className="auth-feat-title">Общение</span>
+                        <span className="auth-feat-desc">Диалоги без поверхностности</span>
+                    </div>
                 </div>
             </div>
         </div>
