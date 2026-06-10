@@ -423,8 +423,6 @@ function App() {
                     </div>
                 </div>
 
-                <p className="auth-sub">Клуб. Курсы. Общение.</p>
-
                 <div className="auth-box">
                     <div className="auth-tabs">
                         <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
