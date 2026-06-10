@@ -324,7 +324,7 @@ input  { font-family: inherit; }
 
 /* ── Partner profile overlay ────────────────────────────────────── */
 .profile-overlay {
-    position: fixed; inset: 0; z-index: 200;
+    position: fixed; inset: 0; z-index: 9999;
     background: rgba(0,0,0,0.6);
     display: flex; align-items: flex-end;
     backdrop-filter: blur(4px);

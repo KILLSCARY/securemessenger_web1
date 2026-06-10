@@ -227,8 +227,8 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
         const chats: any[] = [];
         for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
-            // Skip empty chats (no messages yet) — prevents "Нет сообщений" noise
-            if (!data.lastMessage && !data.lastMessageTime) continue;
+            // Skip chats with no messages sent yet (lastMessageTime is set on creation, so check lastMessage)
+            if (!data.lastMessage) continue;
             const chatId = data.chatId || docSnap.id;
             const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
             const partner = partnerId ? await getUserProfile(partnerId) : null;
@@ -242,8 +242,18 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
                 unreadCount: 0,
             });
         }
-        chats.sort((a, b) => (b.lastMessageTime?.getTime() ?? 0) - (a.lastMessageTime?.getTime() ?? 0));
-        callback(chats);
+        // Deduplicate by partnerId: old auto-ID docs and new canonical sorted-ID docs can coexist
+        const seen = new Map<string, any>();
+        for (const chat of chats) {
+            if (!chat.partnerId) continue;
+            const existing = seen.get(chat.partnerId);
+            if (!existing || (chat.lastMessageTime?.getTime() ?? 0) > (existing.lastMessageTime?.getTime() ?? 0)) {
+                seen.set(chat.partnerId, chat);
+            }
+        }
+        const result = Array.from(seen.values());
+        result.sort((a, b) => (b.lastMessageTime?.getTime() ?? 0) - (a.lastMessageTime?.getTime() ?? 0));
+        callback(result);
     }, (err) => {
         console.error('Chats subscription error:', err);
         callback([]);

@@ -251,7 +251,17 @@ function App() {
                 await updateProfile(r.user, { displayName: uname });
             }
         } catch (e: any) {
-            setAuthErr(e.message);
+            const errMap: Record<string, string> = {
+                'auth/user-not-found':     'Пользователь не найден',
+                'auth/wrong-password':     'Неверный пароль',
+                'auth/invalid-email':      'Неверный формат email',
+                'auth/email-already-in-use': 'Этот email уже используется',
+                'auth/weak-password':      'Пароль слишком слабый (минимум 6 символов)',
+                'auth/too-many-requests':  'Слишком много попыток. Попробуйте позже',
+                'auth/network-request-failed': 'Ошибка сети',
+                'auth/invalid-credential': 'Неверный email или пароль',
+            };
+            setAuthErr(errMap[e?.code] || 'Ошибка авторизации');
             setLoading(false);
         }
     };
@@ -470,7 +480,9 @@ function App() {
                     </div>
                     <div className="chat-header-info" onClick={() => setViewPartner(true)} style={{ cursor: 'pointer' }}>
                         <div className="chat-header-name">{partner.username}</div>
-                        <div className="chat-header-status">{typing.length > 0 ? 'печатает...' : 'онлайн'}</div>
+                        <div className="chat-header-status">
+                            {typing.length > 0 ? 'печатает...' : online.some((u: any) => u.userId === partner.userId) ? 'онлайн' : 'не в сети'}
+                        </div>
                     </div>
                 </div>
 
@@ -738,22 +750,6 @@ function App() {
                             </div>
                         </div>
 
-                        {editProfile && (
-                            <div className="profile-overlay" onClick={() => setEditProfile(false)}>
-                                <div className="profile-sheet edit-profile-sheet" onClick={e => e.stopPropagation()}>
-                                    <div className="profile-sheet-name" style={{ marginBottom: 16 }}>Редактировать профиль</div>
-                                    <input className="nss-input" placeholder="Имя" value={editUsername}
-                                        onChange={e => setEditUsername(e.target.value)} />
-                                    <input className="nss-input" placeholder="О себе" value={editBio}
-                                        onChange={e => setEditBio(e.target.value)} style={{ marginTop: 10 }} />
-                                    <button className="btn-primary" style={{ marginTop: 16 }} onClick={async () => {
-                                        await updateUserProfile(user.uid, { username: editUsername, bio: editBio });
-                                        setProfile((p: any) => ({ ...p, username: editUsername, bio: editBio }));
-                                        setEditProfile(false);
-                                    }}>Сохранить</button>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 )}
             </div>
@@ -782,6 +778,25 @@ function App() {
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* EDIT PROFILE OVERLAY — outside main-wrap so fixed positioning covers the bottom nav */}
+            {editProfile && (
+                <div className="profile-overlay" onClick={() => setEditProfile(false)}>
+                    <div className="profile-sheet edit-profile-sheet" onClick={e => e.stopPropagation()}>
+                        <div className="profile-sheet-name" style={{ marginBottom: 16 }}>Редактировать профиль</div>
+                        <input className="nss-input" placeholder="Имя" value={editUsername}
+                            onChange={e => setEditUsername(e.target.value)} />
+                        <input className="nss-input" placeholder="О себе" value={editBio}
+                            onChange={e => setEditBio(e.target.value)} style={{ marginTop: 10 }} />
+                        <button className="btn-primary" style={{ marginTop: 16 }} onClick={async () => {
+                            if (!editUsername.trim()) return;
+                            await updateUserProfile(user.uid, { username: editUsername.trim(), bio: editBio.trim() });
+                            setProfile((p: any) => ({ ...p, username: editUsername.trim(), bio: editBio.trim() }));
+                            setEditProfile(false);
+                        }}>Сохранить</button>
+                    </div>
                 </div>
             )}
 
