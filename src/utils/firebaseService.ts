@@ -1,371 +1,438 @@
-import { 
-    collection, 
-    addDoc, 
-    query, 
-    where, 
-    orderBy, 
+import {
+    collection,
+    addDoc,
+    query,
+    where,
+    orderBy,
     onSnapshot,
     doc,
     updateDoc,
-    deleteDoc,
     serverTimestamp,
     getDocs,
     getDoc,
     limit,
-    setDoc
+    setDoc,
+    startAfter,
 } from 'firebase/firestore';
-import { 
-    ref, 
-    uploadBytes, 
-    getDownloadURL 
-} from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
+import CryptoJS from 'crypto-js';
 
-const chatKeys = new Map();
-
-const getOrCreateChatKey = async (chatId, userId) => {
-    const keyName = `chat_key_${chatId}_${userId}`;
-    
-    let keyData = sessionStorage.getItem(keyName);
-    if (keyData) {
-        return JSON.parse(keyData);
-    }
-    
-    const { encryptMessage, decryptMessage, generateSessionKey, importKey, exportKey } = await import('./crypto');
-    
-    const newKey = generateSessionKey();
-    const exported = newKey;
-    
-    keyData = { key: exported, createdAt: Date.now() };
-    sessionStorage.setItem(keyName, JSON.stringify(keyData));
-    
-    const chatKeyRef = doc(db, 'chatKeys', chatId);
-    const existing = await getDoc(chatKeyRef);
-    
-    if (!existing.exists()) {
-        await setDoc(chatKeyRef, {
-            chatId,
-            participants: {}
-        });
-    }
-    
-    return keyData;
+// ── Encryption ────────────────────────────────────────────────────
+const encryptText = (text: string, keyHex: string) => {
+    const key = CryptoJS.enc.Hex.parse(keyHex);
+    const iv  = CryptoJS.lib.WordArray.random(16);
+    const enc = CryptoJS.AES.encrypt(text, key, {
+        iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7
+    });
+    return {
+        ciphertext: enc.ciphertext.toString(CryptoJS.enc.Base64),
+        iv: iv.toString(CryptoJS.enc.Hex),
+    };
 };
 
-const getChatKey = async (chatId, userId) => {
-    const keyName = `chat_key_${chatId}_${userId}`;
-    const keyData = sessionStorage.getItem(keyName);
-    if (keyData) {
-        return JSON.parse(keyData).key;
-    }
-    return null;
-};
-
-const saveChatKeyToFirestore = async (chatId, userId, publicKey) => {
-    const chatKeyRef = doc(db, 'chatKeys', chatId);
-    await setDoc(chatKeyRef, {
-        participants: {
-            [userId]: {
-                publicKey,
-                joinedAt: Date.now()
-            }
-        }
-    }, { merge: true });
-};
-
-export const getParticipantPublicKeys = async (chatId) => {
+const decryptText = (ciphertext: string, ivHex: string, keyHex: string): string => {
     try {
-        const chatKeyRef = doc(db, 'chatKeys', chatId);
-        const snapshot = await getDoc(chatKeyRef);
-        if (snapshot.exists()) {
-            return snapshot.data().participants || {};
-        }
-        return {};
-    } catch (error) {
-        console.error('Error getting participant keys:', error);
-        return {};
-    }
+        const key = CryptoJS.enc.Hex.parse(keyHex);
+        const iv  = CryptoJS.enc.Hex.parse(ivHex);
+        const ct  = CryptoJS.enc.Base64.parse(ciphertext);
+        const dec = CryptoJS.AES.decrypt(
+            CryptoJS.lib.CipherParams.create({ ciphertext: ct }),
+            key, { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+        );
+        return dec.toString(CryptoJS.enc.Utf8) || '';
+    } catch { return ''; }
 };
 
-export const createUserProfile = async (userId, username, email) => {
+// ── Profile cache (avoids repeated Firestore reads for the same user) ──
+const profileCache = new Map<string, any>();
+
+// ── Users ─────────────────────────────────────────────────────────
+export const createUserProfile = async (userId: string, username: string, email: string) => {
     try {
-        const usersRef = collection(db, 'users');
         const userDoc = {
-            userId,
-            username,
-            email,
+            userId, username, email,
+            usernameLower: username.toLowerCase(),
             avatar: null,
             status: 'online',
             lastSeen: serverTimestamp(),
             bio: '',
             createdAt: serverTimestamp(),
-            publicKey: null
         };
-        await addDoc(usersRef, userDoc);
-        return userDoc;
+        await setDoc(doc(db, 'users', userId), userDoc, { merge: true });
+        const result = { id: userId, ...userDoc };
+        profileCache.set(userId, result);
+        return result;
     } catch (error) {
         console.error('Error creating profile:', error);
         return null;
     }
 };
 
-export const getUserProfile = async (userId) => {
+export const getUserProfile = async (userId: string) => {
+    if (profileCache.has(userId)) return profileCache.get(userId);
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('userId', '==', userId), limit(1));
+        const snap = await getDoc(doc(db, 'users', userId));
+        if (snap.exists()) {
+            const profile = { id: snap.id, ...snap.data() };
+            profileCache.set(userId, profile);
+            return profile;
+        }
+        // Fallback for old-style auto-ID docs
+        const q = query(collection(db, 'users'), where('userId', '==', userId), limit(1));
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
-        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        const profileData = snapshot.docs[0].data();
+        setDoc(doc(db, 'users', userId), profileData, { merge: true }).catch(() => {});
+        const profile = { id: snapshot.docs[0].id, ...profileData };
+        profileCache.set(userId, profile);
+        return profile;
     } catch (error) {
         console.error('Error getting profile:', error);
         return null;
     }
 };
 
-export const updateUserProfile = async (userId, updates) => {
+export const updateUserProfile = async (userId: string, updates: any) => {
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('userId', '==', userId), limit(1));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-            await updateDoc(doc(db, 'users', snapshot.docs[0].id), updates);
-        }
+        const enriched: any = { userId, lastSeen: serverTimestamp(), ...updates };
+        if (updates.username) enriched.usernameLower = updates.username.toLowerCase();
+        await setDoc(doc(db, 'users', userId), enriched, { merge: true });
+        profileCache.delete(userId);
     } catch (error) {
         console.error('Error updating profile:', error);
     }
 };
 
-export const getOnlineUsers = async () => {
+export const searchUsers = async (searchText: string, currentUserId: string): Promise<any[]> => {
+    const q = searchText.toLowerCase().trim();
+    if (q.length < 2) return [];
     try {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('status', '==', 'online'));
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    } catch (error) {
-        console.error('Error getting online users:', error);
+        const snap = await getDocs(
+            query(
+                collection(db, 'users'),
+                where('usernameLower', '>=', q),
+                where('usernameLower', '<=', q + ''),
+                limit(20)
+            )
+        );
+        return snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter((u: any) => u.userId && u.userId !== currentUserId);
+    } catch (e) {
+        console.error('searchUsers error:', e);
         return [];
     }
 };
 
-let cryptoModule: any = null;
-
-const loadCrypto = async () => {
-    if (!cryptoModule) {
-        cryptoModule = await import('./crypto');
-    }
-    return cryptoModule;
-};
-
-export const saveMessage = async (chatId, message, sessionKey) => {
-    try {
-        const crypto = await loadCrypto();
-        const key = await crypto.importKey(sessionKey);
-        
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const encrypted = await crypto.encryptMessage(message.text, key);
-        
-        const messageDoc = {
-            senderId: message.senderId,
-            senderName: message.senderName,
-            encryptedText: encrypted.ciphertext,
-            iv: encrypted.iv,
-            timestamp: serverTimestamp(),
-            reactions: [],
-            readBy: [message.senderId]
-        };
-        
-        await addDoc(messagesRef, messageDoc);
-        
-        const chatRef = doc(db, 'chats', chatId);
-        await updateDoc(chatRef, {
-            lastMessage: message.text.substring(0, 50),
-            lastMessageTime: serverTimestamp()
-        });
-    } catch (error) {
-        console.error('Error saving message:', error);
-    }
-};
-
-export const subscribeToMessages = (chatId, sessionKey, callback) => {
-    if (!chatId) {
+// Real-time online users with 5-minute staleness check
+export const subscribeToOnlineUsers = (currentUserId: string, callback: (users: any[]) => void) => {
+    const q = query(collection(db, 'users'), where('status', '==', 'online'));
+    return onSnapshot(q, (snapshot) => {
+        const cutoff = Date.now() - 5 * 60 * 1000;
+        const seen = new Set<string>();
+        const users = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter((u: any) => {
+                if (!u.userId || u.userId === currentUserId || seen.has(u.userId)) return false;
+                const ls = u.lastSeen?.toDate?.()?.getTime?.() ?? 0;
+                if (ls < cutoff) return false; // stale
+                seen.add(u.userId);
+                return true;
+            });
+        callback(users);
+    }, (err) => {
+        console.error('Online users subscription error:', err);
         callback([]);
-        return () => {};
-    }
-    
-    let key = null;
-    let decrypt: any = null;
-    
-    (async () => {
-        try {
-            const crypto = await loadCrypto();
-            key = await crypto.importKey(sessionKey);
-            decrypt = crypto.decryptMessage;
-        } catch (e) {
-            console.error('Key import error:', e);
+    });
+};
+
+// ── Messages ─────────────────────────────────────────────────────
+export const saveMessage = async (chatId: string, message: any, sessionKey: string) => {
+    const encrypted = encryptText(message.text || '', sessionKey);
+    const messageDoc: any = {
+        senderId: message.senderId,
+        senderName: message.senderName,
+        encryptedText: encrypted.ciphertext,
+        iv: encrypted.iv,
+        timestamp: serverTimestamp(),
+        reactions: [],
+        readBy: [message.senderId],
+    };
+    if (message.fileUrl)  messageDoc.fileUrl  = message.fileUrl;
+    if (message.fileType) messageDoc.fileType = message.fileType;
+    if (message.fileName) messageDoc.fileName = message.fileName;
+    if (message.replyTo)  messageDoc.replyTo  = message.replyTo;
+
+    await addDoc(collection(db, 'chats', chatId, 'messages'), messageDoc);
+
+    await setDoc(doc(db, 'chats', chatId), {
+        chatId,
+        lastMessage: message.fileUrl ? `📎 ${message.fileName || 'Файл'}` : (message.text || '').substring(0, 60),
+        lastMessageTime: serverTimestamp(),
+        lastSenderId: message.senderId,
+    }, { merge: true });
+};
+
+const decodeDoc = (docSnap: any, sessionKey: string) => {
+    const data = docSnap.data();
+    return {
+        id: docSnap.id,
+        senderId:   data.senderId,
+        senderName: data.senderName,
+        text:       data.deleted ? '' : decryptText(data.encryptedText || '', data.iv || '', sessionKey),
+        fileUrl:    data.fileUrl  ?? null,
+        fileType:   data.fileType ?? null,
+        fileName:   data.fileName ?? null,
+        timestamp:  data.timestamp?.toDate() ?? null,
+        reactions:  data.reactions ?? [],
+        readBy:     data.readBy ?? [],
+        deleted:    data.deleted  ?? false,
+        editedAt:   data.editedAt?.toDate() ?? null,
+        replyTo:    data.replyTo  ?? null,
+    };
+};
+
+export const subscribeToMessages = (
+    chatId: string,
+    sessionKey: string,
+    callback: (msgs: any[]) => void,
+    onMeta?: (hasMore: boolean, oldestDoc: any) => void
+) => {
+    if (!chatId || !sessionKey) { callback([]); return () => {}; }
+
+    const q = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        const msgs = snapshot.docs.map(d => decodeDoc(d, sessionKey)).reverse();
+        if (onMeta) {
+            const oldest = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+            onMeta(snapshot.docs.length >= 50, oldest);
         }
-    })();
-    
-    try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const q = query(messagesRef, orderBy('timestamp', 'asc'));
-        
-        return onSnapshot(q, async (snapshot) => {
-            if (!key || !decrypt) {
-                try {
-                    const crypto = await loadCrypto();
-                    key = await crypto.importKey(sessionKey);
-                    decrypt = crypto.decryptMessage;
-                } catch (e) {
-                    console.error('Key import error:', e);
-                    callback([]);
-                    return;
-                }
-            }
-            
-            const messages = [];
-            for (const docSnap of snapshot.docs) {
-                const data = docSnap.data();
-                let text = '[Encrypted]';
-                try {
-                    text = await decrypt({ ciphertext: data.encryptedText, iv: data.iv }, key);
-                } catch (e) {
-                    console.error('Decrypt error:', e);
-                }
-                
-                messages.push({
-                    id: docSnap.id,
-                    senderId: data.senderId,
-                    senderName: data.senderName,
-                    text,
-                    timestamp: data.timestamp?.toDate(),
-                    reactions: data.reactions || [],
-                    readBy: data.readBy || []
-                });
-            }
-            callback(messages);
-        }, (error) => {
-            console.error('Subscribe error:', error);
-            callback([]);
-        });
-    } catch (error) {
-        console.error('Firebase error:', error);
+        callback(msgs);
+    }, (err) => {
+        console.error('Messages subscription error:', err);
         callback([]);
-        return () => {};
-    }
+    });
 };
 
-export const addReaction = async (chatId, messageId, userId, emoji) => {
+export const loadMoreMessages = async (chatId: string, sessionKey: string, oldestDoc: any) => {
+    const q = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('timestamp', 'desc'),
+        startAfter(oldestDoc),
+        limit(50)
+    );
+    const snapshot = await getDocs(q);
+    const msgs = snapshot.docs.map(d => decodeDoc(d, sessionKey)).reverse();
+    const cursor = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+    return { msgs, hasMore: snapshot.docs.length >= 50, cursor };
+};
+
+export const addReaction = async (chatId: string, messageId: string, userId: string, emoji: string) => {
     try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const q = query(messagesRef);
-        const snapshot = await getDocs(q);
-        const messageDoc = snapshot.docs.find(d => d.id === messageId);
-        
-        if (messageDoc) {
-            const reactions = messageDoc.data().reactions || [];
-            const existingIndex = reactions.findIndex(r => r.userId === userId && r.emoji === emoji);
-            
-            if (existingIndex >= 0) {
-                reactions.splice(existingIndex, 1);
-            } else {
-                reactions.push({ userId, emoji, timestamp: Date.now() });
-            }
-            
-            await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), { reactions });
+        const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+        const messageSnap = await getDoc(messageRef);
+        if (messageSnap.exists()) {
+            const reactions = messageSnap.data().reactions || [];
+            const existing = reactions.findIndex((r: any) => r.userId === userId && r.emoji === emoji);
+            if (existing >= 0) reactions.splice(existing, 1);
+            else reactions.push({ userId, emoji, timestamp: Date.now() });
+            await updateDoc(messageRef, { reactions });
         }
     } catch (error) {
         console.error('Error adding reaction:', error);
     }
 };
 
-export const createChat = async (user1Id, user2Id) => {
+export const subscribeToChatDoc = (chatId: string, callback: (data: any) => void) => {
+    return onSnapshot(doc(db, 'chats', chatId), (snap) => {
+        if (snap.exists()) callback(snap.data());
+    }, (err) => {
+        console.error('Chat doc error:', err);
+    });
+};
+
+export const deleteMessage = async (chatId: string, messageId: string) => {
     try {
-        const chatsRef = collection(db, 'chats');
-        const chatId = [user1Id, user2Id].sort().join('_');
-        
-        const q = query(chatsRef, where('chatId', '==', chatId), limit(1));
-        const existing = await getDocs(q);
-        
-        if (existing.empty) {
-            await addDoc(chatsRef, {
+        await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+            deleted: true, encryptedText: '', iv: '',
+        });
+    } catch (e) { console.error('Delete message error:', e); }
+};
+
+export const editMessage = async (chatId: string, messageId: string, newText: string, sessionKey: string) => {
+    try {
+        const encrypted = encryptText(newText, sessionKey);
+        await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+            encryptedText: encrypted.ciphertext,
+            iv: encrypted.iv,
+            editedAt: serverTimestamp(),
+        });
+    } catch (e) { console.error('Edit message error:', e); }
+};
+
+export const markChatAsRead = async (chatId: string, userId: string) => {
+    try {
+        await updateDoc(doc(db, 'chats', chatId), {
+            [`lastRead.${userId}`]: serverTimestamp(),
+        });
+    } catch { /* chat doc may not exist yet */ }
+};
+
+export const updateCourseProgress = async (userId: string, courseId: string, completedLessons: number[]) => {
+    try {
+        await updateDoc(doc(db, 'users', userId), {
+            [`courseProgress.${courseId}`]: completedLessons,
+            lastSeen: serverTimestamp(),
+        });
+        profileCache.delete(userId);
+    } catch (e) {
+        console.error('Error updating course progress:', e);
+    }
+};
+
+// ── Chats ─────────────────────────────────────────────────────────
+
+// ensureChatExists: creates the chat doc with participants ONLY if it doesn't exist
+export const ensureChatExists = async (chatId: string, user1Id: string, user2Id: string): Promise<void> => {
+    try {
+        const chatRef = doc(db, 'chats', chatId);
+        const existing = await getDoc(chatRef);
+        if (!existing.exists()) {
+            await setDoc(chatRef, {
                 chatId,
                 participants: [user1Id, user2Id],
                 lastMessage: null,
                 lastMessageTime: serverTimestamp(),
-                createdAt: serverTimestamp()
-            });
-            
-            await setDoc(doc(db, 'chatKeys', chatId), {
-                chatId,
-                participants: {},
-                createdAt: serverTimestamp()
+                createdAt: serverTimestamp(),
             });
         }
-        
-        return chatId;
     } catch (error) {
-        console.error('Error creating chat:', error);
-        return `${user1Id}_${user2Id}`.split('_').sort().join('_');
+        console.error('Error ensuring chat exists:', error);
     }
 };
 
-export const getUserChats = async (userId) => {
-    try {
-        const chatsRef = collection(db, 'chats');
-        const q = query(
-            chatsRef, 
-            where('participants', 'array-contains', userId),
-            orderBy('lastMessageTime', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        
-        const userProfile = await getUserProfile(userId);
-        const usersRef = collection(db, 'users');
-        
-        const chats = [];
-        for (const docSnap of snapshot.docs) {
-            const chatData = docSnap.data();
-            const partnerId = chatData.participants.find(p => p !== userId);
-            
-            let partnerProfile = null;
-            if (partnerId) {
-                const partnerQ = query(usersRef, where('userId', '==', partnerId), limit(1));
-                const partnerSnap = await getDocs(partnerQ);
-                if (!partnerSnap.empty) {
-                    partnerProfile = { id: partnerSnap.docs[0].id, ...partnerSnap.docs[0].data() };
-                }
+export const createChat = async (user1Id: string, user2Id: string) => {
+    const chatId = [user1Id, user2Id].sort().join('_');
+    await ensureChatExists(chatId, user1Id, user2Id);
+    return chatId;
+};
+
+// Real-time chat list — incremental updates via docChanges() to avoid O(n) profile reads per snapshot
+export const subscribeToChats = (userId: string, callback: (chats: any[]) => void) => {
+    const q = query(collection(db, 'chats'), where('participants', 'array-contains', userId));
+    const chatMap = new Map<string, any>(); // docId → chat object
+
+    const emit = () => {
+        const seen = new Map<string, any>();
+        for (const chat of chatMap.values()) {
+            if (!chat.partnerId) continue;
+            const existing = seen.get(chat.partnerId);
+            if (!existing || (chat.lastMessageTime?.getTime() ?? 0) > (existing.lastMessageTime?.getTime() ?? 0)) {
+                seen.set(chat.partnerId, chat);
             }
-            
-            chats.push({
-                id: docSnap.id,
-                chatId: chatData.chatId,
-                partnerId,
-                partner: partnerProfile,
-                lastMessage: chatData.lastMessage,
-                lastMessageTime: chatData.lastMessageTime?.toDate(),
-                unreadCount: 0
-            });
         }
-        
-        return chats;
-    } catch (error) {
-        console.error('Error getting chats:', error);
-        return [];
-    }
+        const result = Array.from(seen.values());
+        result.sort((a, b) => (b.lastMessageTime?.getTime() ?? 0) - (a.lastMessageTime?.getTime() ?? 0));
+        callback(result);
+    };
+
+    return onSnapshot(q, async (snapshot) => {
+        const fetches: Promise<void>[] = [];
+
+        for (const change of snapshot.docChanges()) {
+            const docSnap = change.doc;
+            const data = docSnap.data();
+
+            if (change.type === 'removed' || !data.lastMessage) {
+                chatMap.delete(docSnap.id);
+                continue;
+            }
+
+            const chatId = data.chatId || docSnap.id;
+            const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
+            const lastMsgTime = data.lastMessageTime?.toDate()?.getTime() ?? 0;
+            const lastReadTime = data.lastRead?.[userId]?.toDate()?.getTime() ?? 0;
+            const isUnread = data.lastSenderId !== userId && lastMsgTime > lastReadTime;
+
+            const entry: any = {
+                id: docSnap.id, chatId, partnerId,
+                partner: chatMap.get(docSnap.id)?.partner ?? null,
+                lastMessage: data.lastMessage ?? null,
+                lastMessageTime: data.lastMessageTime?.toDate() ?? null,
+                isUnread,
+            };
+            chatMap.set(docSnap.id, entry);
+
+            if (partnerId) {
+                fetches.push(
+                    getUserProfile(partnerId).then(p => { entry.partner = p; })
+                );
+            }
+        }
+
+        await Promise.all(fetches);
+        emit();
+    }, (err) => {
+        console.error('Chats subscription error:', err);
+        callback([]);
+    });
 };
 
-export const getChatSessionKey = async (chatId: string, userId: string): Promise<string> => {
-    const keyData = sessionStorage.getItem(`chat_key_${chatId}`);
-    if (keyData) {
-        const parsed = JSON.parse(keyData);
-        return parsed.key;
+// ── Session Key (ECDH-based) ──────────────────────────────────────
+export const getChatSessionKey = async (chatId: string, userId: string, partnerId?: string): Promise<string> => {
+    const keyName = `nss_chatkey_${chatId}`;
+    // Use localStorage (not sessionStorage) so key persists across sessions
+    const cached = localStorage.getItem(keyName);
+    if (cached) return cached;
+
+    let key: string;
+
+    if (partnerId && !chatId.startsWith('city_')) {
+        // Private chat: try ECDH derivation
+        try {
+            const snap = await getDoc(doc(db, 'users', partnerId));
+            if (snap.exists() && snap.data()?.ecdhPublicKey) {
+                const { deriveChatKey } = await import('./e2e');
+                key = await deriveChatKey(userId, snap.data().ecdhPublicKey);
+                localStorage.setItem(keyName, key);
+                return key;
+            }
+        } catch (e) {
+            console.warn('ECDH derivation failed, using legacy key:', e);
+        }
     }
-    
-    const newKey = generateRandomKey();
-    const storedData = { key: newKey, createdAt: Date.now() };
-    sessionStorage.setItem(`chat_key_${chatId}`, JSON.stringify(storedData));
-    
-    return newKey;
+
+    if (chatId.startsWith('city_')) {
+        // Group chat: deterministic key from chatId
+        const { deterministicGroupKey } = await import('./e2e');
+        key = await deterministicGroupKey(chatId);
+        localStorage.setItem(keyName, key);
+        return key;
+    }
+
+    // Legacy fallback: check Firestore for old key
+    try {
+        const snapshot = await getDoc(doc(db, 'chatKeys', chatId));
+        if (snapshot.exists() && snapshot.data()?.sharedKey) {
+            key = snapshot.data().sharedKey as string;
+            localStorage.setItem(keyName, key);
+            return key;
+        }
+    } catch (e) { /* ignore */ }
+
+    // Generate new random key for this chat
+    key = generateRandomKey();
+    localStorage.setItem(keyName, key);
+    try {
+        await setDoc(doc(db, 'chatKeys', chatId), { sharedKey: key }, { merge: true });
+    } catch (e) { /* ignore */ }
+    return key;
 };
 
 function generateRandomKey() {
@@ -374,15 +441,8 @@ function generateRandomKey() {
     return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function hexToArrayBuffer(hex) {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return bytes.buffer;
-}
-
-export const uploadAvatar = async (userId, file) => {
+// ── Storage ───────────────────────────────────────────────────────
+export const uploadAvatar = async (userId: string, file: File) => {
     try {
         const avatarRef = ref(storage, `avatars/${userId}`);
         await uploadBytes(avatarRef, file);
@@ -395,116 +455,29 @@ export const uploadAvatar = async (userId, file) => {
     }
 };
 
-export const uploadFile = async (chatId, file, senderId) => {
-    try {
-        const timestamp = Date.now();
-        const extension = file.name.split('.').pop();
-        const fileName = `${chatId}_${timestamp}.${extension}`;
-        const fileRef = ref(storage, `files/${fileName}`);
-        
-        await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
-        
-        return url;
-    } catch (error) {
-        console.error('Error uploading file:', error);
-        return null;
-    }
+export const uploadFile = async (chatId: string, file: File, senderId: string) => {
+    const ext  = file.name.split('.').pop() || 'bin';
+    const path = `files/${chatId}/${senderId}_${Date.now()}.${ext}`;
+    const fileRef = ref(storage, path);
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+    return { url, name: file.name, type: file.type };
 };
 
-export const uploadStatus = async (userId, file, type = 'image') => {
+// ── Typing ────────────────────────────────────────────────────────
+export const setTypingStatus = async (chatId: string, userId: string, isTyping: boolean) => {
     try {
-        const statusRef = ref(storage, `statuses/${userId}_${Date.now()}`);
-        await uploadBytes(statusRef, file);
-        const url = await getDownloadURL(statusRef);
-        
-        const statusesRef = collection(db, 'statuses');
-        await addDoc(statusesRef, {
-            userId,
-            type,
-            url,
-            createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-        });
-        
-        return url;
-    } catch (error) {
-        console.error('Error uploading status:', error);
-        return null;
-    }
-};
-
-export const getStatuses = async () => {
-    try {
-        const statusesRef = collection(db, 'statuses');
-        const now = new Date();
-        const q = query(
-            statusesRef,
-            orderBy('createdAt', 'desc'),
-            limit(20)
-        );
-        const snapshot = await getDocs(q);
-        
-        const statuses = [];
-        for (const docSnap of snapshot.docs) {
-            const data = docSnap.data();
-            if (data.expiresAt && data.expiresAt.toDate && data.expiresAt.toDate() > now) {
-                const userProfile = await getUserProfile(data.userId);
-                statuses.push({
-                    id: docSnap.id,
-                    ...data,
-                    user: userProfile
-                });
-            }
-        }
-        return statuses;
-    } catch (error) {
-        console.error('Error getting statuses:', error);
-        return [];
-    }
-};
-
-export const setTypingStatus = async (chatId, userId, isTyping) => {
-    try {
-        const typingRef = doc(db, 'typing', chatId, 'status', userId);
-        await setDoc(typingRef, {
-            userId,
-            isTyping,
-            timestamp: serverTimestamp()
+        await setDoc(doc(db, 'typing', chatId, 'status', userId), {
+            userId, isTyping, timestamp: serverTimestamp(),
         }, { merge: true });
-    } catch (error) {
-        console.error('Error setting typing status:', error);
-    }
+    } catch (error) { console.error('Error setting typing status:', error); }
 };
 
-export const subscribeToTyping = (chatId, userId, callback) => {
+export const subscribeToTyping = (chatId: string, userId: string, callback: (users: string[]) => void) => {
     try {
-        const typingRef = collection(db, 'typing', chatId, 'status');
-        const q = query(typingRef, where('isTyping', '==', true));
-        
-        return onSnapshot(q, (snapshot) => {
-            const typingUsers = snapshot.docs
-                .filter(d => d.id !== userId)
-                .map(d => d.id);
-            callback(typingUsers);
-        });
-    } catch (error) {
-        console.error('Error subscribing to typing:', error);
-        callback([]);
-        return () => {};
-    }
-};
-
-export const searchMessages = async (chatId, searchTerm) => {
-    try {
-        const messagesRef = collection(db, 'chats', chatId, 'messages');
-        const snapshot = await getDocs(messagesRef);
-        
-        return snapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() }))
-            .filter(m => m.senderName.toLowerCase().includes(searchTerm.toLowerCase()));
-    } catch (error) {
-        console.error('Error searching messages:', error);
-        return [];
-    }
+        return onSnapshot(
+            query(collection(db, 'typing', chatId, 'status'), where('isTyping', '==', true)),
+            (snapshot) => callback(snapshot.docs.filter(d => d.id !== userId).map(d => d.id)),
+        );
+    } catch { callback([]); return () => {}; }
 };

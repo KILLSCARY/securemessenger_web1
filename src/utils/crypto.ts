@@ -79,9 +79,10 @@ export const decryptMessage = async (encryptedData, key) => {
             const keyWordArray = key instanceof CryptoJS.lib.WordArray ? key : CryptoJS.enc.Hex.parse(key);
             const iv = CryptoJS.enc.Hex.parse(encryptedData.iv);
             const ciphertext = CryptoJS.enc.Base64.parse(encryptedData.ciphertext);
-            
+            const cipherParams = CryptoJS.lib.CipherParams.create({ ciphertext });
+
             const decrypted = CryptoJS.AES.decrypt(
-                ciphertext,
+                cipherParams,
                 keyWordArray,
                 {
                     iv: iv,

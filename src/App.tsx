@@ -1,932 +1,1338 @@
 import { useState, useEffect, useRef, useCallback, Component } from 'react';
-import { 
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged,
-    updateProfile
+import {
+    createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    signOut, onAuthStateChanged, updateProfile,
+    sendPasswordResetEmail, sendEmailVerification,
 } from 'firebase/auth';
 import { auth } from './firebase';
+import { generateMessageId } from './utils/crypto';
 import {
-    generateMessageId
-} from './utils/crypto';
-import {
-    createUserProfile,
-    getUserProfile,
-    updateUserProfile,
-    subscribeToMessages,
-    saveMessage,
-    addReaction,
-    uploadAvatar,
-    uploadStatus,
-    getChatSessionKey,
-    setTypingStatus,
-    subscribeToTyping,
-    getUserChats,
-    createChat,
-    getOnlineUsers,
-    uploadFile,
-    getStatuses
+    createUserProfile, getUserProfile, updateUserProfile,
+    subscribeToMessages, loadMoreMessages, saveMessage, addReaction,
+    uploadAvatar, getChatSessionKey, setTypingStatus,
+    subscribeToTyping, subscribeToChats, ensureChatExists,
+    subscribeToOnlineUsers, uploadFile, updateCourseProgress,
+    markChatAsRead, searchUsers, subscribeToChatDoc,
+    deleteMessage, editMessage,
 } from './utils/firebaseService';
+import { initECDHKeys } from './utils/e2e';
+import './App.css';
 
-class ErrorBoundary extends Component {
-    constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-    }
-    static getDerivedStateFromError(error) {
-        return { hasError: true, error };
-    }
-    componentDidCatch(error, errorInfo) {
-        console.error('React Error:', error, errorInfo);
-    }
+// ── Error Boundary ────────────────────────────────────────────────
+class ErrorBoundary extends Component<any, any> {
+    state = { hasError: false, error: null };
+    static getDerivedStateFromError(e: any) { return { hasError: true, error: e }; }
     render() {
-        if (this.state.hasError) {
-            return (
-                <div style={{ 
-                    padding: 20, 
-                    color: 'white', 
-                    background: '#0A0B10', 
-                    height: '100%',
-                    fontFamily: 'sans-serif'
-                }}>
-                    <h1 style={{color: '#FF5C7A'}}>Something went wrong</h1>
-                    <pre style={{background: 'rgba(255,255,255,0.1)', padding: 10, borderRadius: 8}}>
-                        {this.state.error?.message || this.state.error?.toString() || 'Unknown error'}
-                    </pre>
-                </div>
-            );
-        }
+        if (this.state.hasError) return (
+            <div style={{ padding: 24, color: '#fff', background: '#0A0B10', height: '100dvh' }}>
+                <h2 style={{ color: '#FF5C7A', marginBottom: 12 }}>Ошибка приложения</h2>
+                <pre style={{ fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
+                    {(this.state.error as any)?.message || String(this.state.error)}
+                </pre>
+            </div>
+        );
         return this.props.children;
     }
 }
 
-import './App.css';
-
+// ── Constants ─────────────────────────────────────────────────────
 const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
-const EMOJIS = ['😀', '😂', '😍', '🥰', '😎', '🤔', '😅', '😭', '😤', '🥳', '😴', '🤯', '👍', '👎', '👋', '🙏', '💪', '🎉', '🔥', '❤️', '💔', '✨', '🌟', '💯'];
+const EMOJIS = ['😀','😂','😍','🥰','😎','🤔','😅','😭','😤','🥳','😴','🤯','👍','👎','👋','🙏','💪','🎉','🔥','❤️','💔','✨','🌟','💯'];
+const CITY_CHATS = [
+    { id: 'city_moscow', name: 'Москва', short: 'МСК', color: '#8B5CF6' },
+    { id: 'city_spb', name: 'Санкт-Петербург', short: 'СПБ', color: '#3B82F6' },
+    { id: 'city_novosibirsk', name: 'Новосибирск', short: 'НСБ', color: '#10B981' },
+    { id: 'city_yekaterinburg', name: 'Екатеринбург', short: 'ЕКБ', color: '#F59E0B' },
+    { id: 'city_kazan', name: 'Казань', short: 'КЗН', color: '#EF4444' },
+    { id: 'city_krasnodar', name: 'Краснодар', short: 'КРД', color: '#EC4899' },
+];
+const COURSES = [
+    {
+        id: 'sales', title: 'Продажи с нуля', icon: '🎯', color: '#8B5CF6',
+        desc: 'Скрипты, возражения, закрытие сделок',
+        lessons: [
+            'Что такое продажи и почему все продают',
+            'Психология покупателя: страхи и желания',
+            'Первый контакт: как начать разговор',
+            'Выявление потребностей: вопросы SPIN',
+            'Презентация ценности, а не продукта',
+            'Работа с возражениями: 5 техник',
+            'Закрытие сделки: когда и как просить',
+            'Работа с отказами: как не сгореть',
+        ],
+    },
+    {
+        id: 'team', title: 'Построение команды', icon: '👥', color: '#3B82F6',
+        desc: 'Найм, адаптация, управление отделом',
+        lessons: [
+            'Когда нужна команда и с чего начать',
+            'Профиль должности и поиск людей',
+            'Собеседование: что спрашивать',
+            'Онбординг: первые 30 дней сотрудника',
+            'Делегирование без потери качества',
+            'Мотивация: деньги и не только',
+            'Обратная связь: похвала и критика',
+            'Как и когда расставаться с людьми',
+        ],
+    },
+    {
+        id: 'brand', title: 'Личный бренд', icon: '⭐', color: '#F59E0B',
+        desc: 'Стать экспертом в своей нише',
+        lessons: [
+            'Что такое личный бренд и зачем он',
+            'Найти свою нишу и аудиторию',
+            'Упаковка: фото, биография, ценности',
+            'Контент-план: о чём говорить',
+            'Сторителлинг: как рассказывать истории',
+            'Нетворкинг: знакомства и связи',
+        ],
+    },
+    {
+        id: 'finance', title: 'Финансы бизнеса', icon: '💰', color: '#10B981',
+        desc: 'Планирование и масштабирование',
+        lessons: [
+            'Считаем деньги: P&L и баланс',
+            'Юнит-экономика: один клиент',
+            'Бюджетирование и план-факт',
+            'Инвестиции: когда и во что',
+            'Налоги для предпринимателя',
+            'Масштабирование без потери прибыли',
+        ],
+    },
+    {
+        id: 'nego', title: 'Переговоры', icon: '🤝', color: '#EF4444',
+        desc: 'Психология и техники влияния',
+        lessons: [
+            'Принципы win-win переговоров',
+            'Подготовка: интересы и BATNA',
+            'Активное слушание и эмпатия',
+            'Техники убеждения и влияния',
+            'Сложные переговоры: давление',
+            'Итог и фиксация договорённостей',
+        ],
+    },
+];
 
-function IconChat({ color = '#fff', size = 22 }) {
+// ── AudioPlayer ───────────────────────────────────────────────────
+function AudioPlayer({ url, label, isMe }: { url: string; label?: string; isMe: boolean }) {
+    const [playing, setPlaying] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const audioRef = useRef<HTMLAudioElement>(null);
+
+    const toggle = () => {
+        const a = audioRef.current;
+        if (!a) return;
+        if (playing) { a.pause(); } else { a.play(); }
+        setPlaying(!playing);
+    };
+
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M8 18H5L6.2 15.6C5.45 14.69 5 13.53 5 12.25C5 8.8 8.13 6 12 6C15.87 6 19 8.8 19 12.25C19 15.7 15.87 18.5 12 18.5C10.64 18.5 9.38 18.15 8.3 17.55L8 18Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <div className={`voice-msg ${isMe ? 'voice-me' : 'voice-them'}`}>
+            <audio ref={audioRef}
+                src={url}
+                onEnded={() => { setPlaying(false); setProgress(0); }}
+                onTimeUpdate={e => {
+                    const a = e.currentTarget;
+                    if (a.duration) setProgress(a.currentTime / a.duration);
+                }}
+            />
+            <button className="voice-play" onClick={toggle}>{playing ? '⏸' : '▶'}</button>
+            <div className="voice-body">
+                <div className="voice-wave">
+                    {Array.from({length: 20}, (_, i) => (
+                        <div key={i} className="voice-bar" style={{
+                            height: `${20 + Math.sin(i * 0.8) * 10 + Math.cos(i * 1.3) * 8}px`,
+                            opacity: i / 20 <= progress ? 1 : 0.3
+                        }} />
+                    ))}
+                </div>
+                <span className="voice-label">{label || 'Голосовое'}</span>
+            </div>
+        </div>
     );
 }
 
-function IconCall({ color = '#fff', size = 22 }) {
+// ── Avatar ────────────────────────────────────────────────────────
+function Ava({ src = '', name = '?', size = 48, online = false, color = '#EAB308' }: {
+    src?: string | null; name?: string; size?: number; online?: boolean; color?: string;
+}) {
+    const letter = (name || '?')[0]?.toUpperCase() || '?';
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M6.9 4.5L9.3 4.2C9.72 4.15 10.12 4.39 10.28 4.78L11.38 7.41C11.52 7.75 11.43 8.15 11.15 8.39L9.76 9.58C10.68 11.45 12.2 12.97 14.07 13.89L15.26 12.5C15.5 12.22 15.9 12.13 16.24 12.27L18.87 13.37C19.26 13.53 19.5 13.93 19.45 14.35L19.15 16.75C19.08 17.31 18.61 17.73 18.05 17.73C10.95 17.73 5.92 12.7 5.92 5.6C5.92 5.04 6.34 4.57 6.9 4.5Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        <div className="ava-wrap" style={{ width: size, height: size }}>
+            <div className="ava" style={{ width: size, height: size, background: color }}>
+                {src ? <img src={src} alt={name} /> : <span style={{ fontSize: size * 0.37 }}>{letter}</span>}
+            </div>
+            {online && <div className="ava-online" />}
+        </div>
     );
 }
 
-function IconUser({ color = '#fff', size = 22 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="8" r="3.5" stroke={color} strokeWidth="1.8"/>
-            <path d="M5.5 18.5C6.9 15.95 9.16 14.8 12 14.8C14.84 14.8 17.1 15.95 18.5 18.5" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
-        </svg>
-    );
+// ── Icons ─────────────────────────────────────────────────────────
+function IcoBack() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M15 6L9 12L15 18" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IcoSend() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="#000" strokeWidth="2" strokeLinecap="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IcoArrow() {
+    return <svg width={16} height={16} viewBox="0 0 24 24" fill="none"><path d="M9 6L15 12L9 18" stroke="#7A7A62" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+}
+function IcoCompose() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+        <path d="M12 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L12 14l-4 1 1-4 7.5-7.5z" stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>;
 }
 
-function IconArrow({ color = '#fff', size = 18 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M9 6L15 12L9 18" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-    );
-}
-
-function IconSend({ color = '#fff', size = 20 }) {
-    return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <path d="M21 3L10 14" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M21 3L14 21L10 14L3 10L21 3Z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-    );
-}
-
+// ── App ───────────────────────────────────────────────────────────
 function App() {
-    const [user, setUser] = useState(null);
-    const [userProfile, setUserProfile] = useState(null);
+    const [user, setUser] = useState<any>(null);
+    const [profile, setProfile] = useState<any>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [username, setUsername] = useState('');
+    const [uname, setUname] = useState('');
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const [authErr, setAuthErr] = useState('');
 
-    const [messages, setMessages] = useState([]);
+    const [messages, setMessages] = useState<any[]>([]);
     const [input, setInput] = useState('');
-    const [currentPartner, setCurrentPartner] = useState(null);
-    const [chatId, setChatId] = useState(null);
-    const [sessionKey, setSessionKey] = useState(null);
+    const [partner, setPartner] = useState<any>(null);
+    const [chatId, setChatId] = useState<string | null>(null);
+    const [sessionKey, setSessionKey] = useState<string | null>(null);
+    const [selFile, setSelFile] = useState<any>(null);
 
-    const [chats, setChats] = useState([]);
-    const [onlineUsers, setOnlineUsers] = useState([]);
-    const [typingUsers, setTypingUsers] = useState([]);
+    const [chats, setChats] = useState<any[]>([]);
+    const [online, setOnline] = useState<any[]>([]);
+    const [typing, setTyping] = useState<any[]>([]);
 
-    const [activeTab, setActiveTab] = useState('chats');
-    const [showProfile, setShowProfile] = useState(false);
-    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [tab, setTab] = useState('chats');
     const [searchQuery, setSearchQuery] = useState('');
-    const [showReactionPicker, setShowReactionPicker] = useState(null);
-    const [theme, setTheme] = useState('dark');
-    const [selectedFile, setSelectedFile] = useState(null);
+    const [settingsToast, setSettingsToast] = useState('');
 
-    const fileInputRef = useRef(null);
-    const messagesEndRef = useRef(null);
-    const typingTimeoutRef = useRef(null);
+    // New chat / user search
+    const [showNewChat, setShowNewChat] = useState(false);
+    const [newChatSearch, setNewChatSearch] = useState('');
+    const [userResults, setUserResults] = useState<any[]>([]);
+    const [searchingUsers, setSearchingUsers] = useState(false);
+    const userSearchTimer = useRef<any>(null);
+    const [showEmoji, setShowEmoji] = useState(false);
+    const [msgMenu, setMsgMenu] = useState<{ id: string; isMe: boolean; text: string; senderName: string; deleted?: boolean } | null>(null);
+    const [replyTo, setReplyTo] = useState<{ id: string; text: string; senderName: string } | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editInput, setEditInput] = useState('');
+    const [cityOpen, setCityOpen] = useState(true);
+    const [viewPartner, setViewPartner] = useState(false);
+    const [sendErr, setSendErr] = useState('');
+    const [editProfile, setEditProfile] = useState(false);
+    const [editUsername, setEditUsername] = useState('');
+    const [editBio, setEditBio] = useState('');
 
+    // Auth / reset
+    const [resetMode, setResetMode] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetSent, setResetSent] = useState(false);
+
+    // Courses
+    const [courseProgress, setCourseProgress] = useState<Record<string, number[]>>({});
+    const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+
+    // Email verification
+    const [emailVerifSent, setEmailVerifSent] = useState(false);
+
+    // Message pagination
+    const [olderMessages, setOlderMessages] = useState<any[]>([]);
+    const [hasMoreMessages, setHasMoreMessages] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const msgCursorRef = useRef<any>(null);
+
+    // Read receipts & image viewer
+    const [partnerLastRead, setPartnerLastRead] = useState<Date | null>(null);
+    const [viewerImg, setViewerImg] = useState<string | null>(null);
+
+    // Voice recording state
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordDuration, setRecordDuration] = useState(0);
+
+    const fileRef = useRef<any>(null);
+    const avaRef = useRef<any>(null);
+    const endRef = useRef<any>(null);
+    const typingTimer = useRef<any>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const recordTimerRef = useRef<any>(null);
+    const lastActivityRef = useRef<number>(Date.now());
+
+    // Auth
     useEffect(() => {
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        setTheme(savedTheme);
-        document.documentElement.setAttribute('data-theme', savedTheme);
-    }, []);
-
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-            if (firebaseUser) {
-                setUser(firebaseUser);
-                let profile = await getUserProfile(firebaseUser.uid);
-                
-                if (!profile) {
-                    const username = sessionStorage.getItem('temp_username') || firebaseUser.email.split('@')[0];
-                    profile = await createUserProfile(firebaseUser.uid, username, firebaseUser.email);
+        const unsub = onAuthStateChanged(auth, async (fu) => {
+            if (fu) {
+                setUser(fu);
+                let p = await getUserProfile(fu.uid);
+                if (!p) {
+                    const n = sessionStorage.getItem('temp_username') || fu.email!.split('@')[0];
+                    p = await createUserProfile(fu.uid, n, fu.email!);
                     sessionStorage.removeItem('temp_username');
                 }
-                
-                setUserProfile(profile);
+                // Init ECDH keys and store public key in profile
+                try {
+                    const publicKeyJwk = await initECDHKeys(fu.uid);
+                    // Pass username so updateUserProfile sets usernameLower for existing users too
+                    await updateUserProfile(fu.uid, { status: 'online', ecdhPublicKey: publicKeyJwk, ...(p?.username && { username: p.username }) });
+                } catch (e) {
+                    console.warn('ECDH init failed:', e);
+                    await updateUserProfile(fu.uid, { status: 'online', ...(p?.username && { username: p.username }) });
+                }
+                setProfile(p);
+                setCourseProgress(p?.courseProgress || {});
             } else {
-                setUser(null);
-                setUserProfile(null);
+                setUser(null); setProfile(null);
             }
             setLoading(false);
         });
-
-        return () => unsubscribe();
+        return () => unsub();
     }, []);
 
     useEffect(() => {
-        if (user && chatId && sessionKey) {
-            const unsubscribe = subscribeToMessages(chatId, sessionKey, setMessages);
-            return () => unsubscribe && unsubscribe();
-        } else {
-            setMessages([]);
-        }
-    }, [chatId, sessionKey, user]);
-
-    const loadChats = useCallback(async () => {
-        if (!user) return;
-        const userChats = await getUserChats(user.uid);
-        setChats(userChats);
+        const off = () => user && updateUserProfile(user.uid, { status: 'offline' });
+        window.addEventListener('beforeunload', off);
+        return () => window.removeEventListener('beforeunload', off);
     }, [user]);
 
-    const loadStatuses = useCallback(async () => {
-        await getStatuses();
+    // Messages with pagination
+    useEffect(() => {
+        msgCursorRef.current = null;
+        setOlderMessages([]);
+        setHasMoreMessages(false);
+        if (user && chatId && sessionKey) {
+            const unsub = subscribeToMessages(chatId, sessionKey, setMessages, (hasMore, cursor) => {
+                if (!msgCursorRef.current) {
+                    msgCursorRef.current = cursor;
+                    setHasMoreMessages(hasMore);
+                }
+            });
+            return () => unsub?.();
+        }
+        setMessages([]);
+    }, [chatId, sessionKey, user]);
+
+    useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+    // Track user activity for smart heartbeat
+    useEffect(() => {
+        const touch = () => { lastActivityRef.current = Date.now(); };
+        window.addEventListener('pointerdown', touch);
+        window.addEventListener('keydown', touch);
+        return () => { window.removeEventListener('pointerdown', touch); window.removeEventListener('keydown', touch); };
     }, []);
 
+    // Real-time chats & online users — no polling
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+        if (!user) return;
+        const unsubChats = subscribeToChats(user.uid, setChats);
+        const unsubOnline = subscribeToOnlineUsers(user.uid, setOnline);
+        // Heartbeat: only ping Firestore if user was active in last 5 min
+        const heartbeat = setInterval(() => {
+            if (Date.now() - lastActivityRef.current < 5 * 60_000) {
+                updateUserProfile(user.uid, { status: 'online' });
+            }
+        }, 90_000);
+        return () => { unsubChats(); unsubOnline(); clearInterval(heartbeat); };
+    }, [user]);
 
+    // Auto-clear send error
     useEffect(() => {
-        if (user) {
-            loadChats();
-            loadStatuses();
-            const interval = setInterval(async () => {
-                const users = await getOnlineUsers();
-                setOnlineUsers(users.filter(u => u.userId !== user.uid));
-            }, 5000);
-            return () => clearInterval(interval);
-        }
-    }, [user, loadChats, loadStatuses]);
+        if (!sendErr) return;
+        const t = setTimeout(() => setSendErr(''), 3000);
+        return () => clearTimeout(t);
+    }, [sendErr]);
 
+    // Auto-clear settings toast
     useEffect(() => {
-        if (chatId && user) {
-            const unsubscribe = subscribeToTyping(chatId, user.uid, (users) => {
-                setTypingUsers(users);
-            });
-            return () => unsubscribe();
-        } else {
-            setTypingUsers([]);
-        }
+        if (!settingsToast) return;
+        const t = setTimeout(() => setSettingsToast(''), 2500);
+        return () => clearTimeout(t);
+    }, [settingsToast]);
+
+    // Typing
+    useEffect(() => {
+        if (!chatId || !user) { setTyping([]); return; }
+        const unsub = subscribeToTyping(chatId, user.uid, setTyping);
+        return () => unsub();
     }, [chatId, user]);
 
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
+    // Read receipts — track when partner last read this chat
+    useEffect(() => {
+        if (!chatId || !partner || chatId.startsWith('city_')) { setPartnerLastRead(null); return; }
+        const unsub = subscribeToChatDoc(chatId, (data) => {
+            const ts = data?.lastRead?.[partner.userId]?.toDate?.() ?? null;
+            setPartnerLastRead(ts);
+        });
+        return () => unsub();
+    }, [chatId, partner]);
 
+    // Actions
+    const handleAuth = async () => {
+        setAuthErr('');
+        setLoading(true);
         try {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
-                sessionStorage.setItem('temp_username', username);
-                const result = await createUserWithEmailAndPassword(auth, email, password);
-                await updateProfile(result.user, { displayName: username });
+                sessionStorage.setItem('temp_username', uname);
+                const r = await createUserWithEmailAndPassword(auth, email, password);
+                await updateProfile(r.user, { displayName: uname });
             }
-        } catch (err) {
-            setError(err.message);
+        } catch (e: any) {
+            const errMap: Record<string, string> = {
+                'auth/user-not-found':     'Пользователь не найден',
+                'auth/wrong-password':     'Неверный пароль',
+                'auth/invalid-email':      'Неверный формат email',
+                'auth/email-already-in-use': 'Этот email уже используется',
+                'auth/weak-password':      'Пароль слишком слабый (минимум 6 символов)',
+                'auth/too-many-requests':  'Слишком много попыток. Попробуйте позже',
+                'auth/network-request-failed': 'Ошибка сети',
+                'auth/invalid-credential': 'Неверный email или пароль',
+            };
+            setAuthErr(errMap[e?.code] || 'Ошибка авторизации');
+            setLoading(false);
         }
-        setLoading(false);
     };
 
-    const _handleLogout = async () => {
+    const handleLogout = async () => {
+        await updateUserProfile(user.uid, { status: 'offline' });
         await signOut(auth);
-        setCurrentPartner(null);
-        setChatId(null);
-        setMessages([]);
+        setPartner(null); setChatId(null); setMessages([]); setTab('chats');
     };
 
-    const toggleTheme = () => {
-        const newTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(newTheme);
-        localStorage.setItem('theme', newTheme);
-        document.documentElement.setAttribute('data-theme', newTheme);
-    };
-
-    const startChat = async (partnerId, partnerName, partnerAvatar = null) => {
-        const newChatId = await createChat(user.uid, partnerId);
-        const key = await getChatSessionKey(newChatId, user.uid);
-        
-        setChatId(newChatId);
+    const startChat = async (pid: string, pname: string, pava: any = null) => {
+        const isGroup = pid.startsWith('__group_');
+        const cid = isGroup ? pid.replace('__group_', '') : [user.uid, pid].sort().join('_');
+        const key = await getChatSessionKey(cid, user.uid, isGroup ? undefined : pid);
+        setChatId(cid);
         setSessionKey(key);
-        setCurrentPartner({ 
-            userId: partnerId, 
-            username: partnerName,
-            avatar: partnerAvatar 
-        });
-        setActiveTab('chat');
+        setPartner({ userId: pid, username: pname, avatar: pava });
+        setSearchQuery('');
+        closeNewChat();
+        setTab('chat');
+        markChatAsRead(cid, user.uid);
     };
 
-    const sendMessage = async () => {
-        if ((!input.trim() && !selectedFile) || !chatId || !sessionKey) return;
-
-        await setTypingStatus(chatId, user.uid, false);
-
-        if (selectedFile) {
-            const message = {
-                id: generateMessageId(),
-                text: `[File] ${selectedFile.name}`,
-                senderId: user.uid,
-                senderName: userProfile?.username || user.email,
-                fileUrl: selectedFile.url,
-                fileType: selectedFile.type
-            };
-            await saveMessage(chatId, message, sessionKey);
-            setSelectedFile(null);
-        }
-
-        if (input.trim()) {
-            const message = {
-                id: generateMessageId(),
-                text: input,
-                senderId: user.uid,
-                senderName: userProfile?.username || user.email
-            };
-            await saveMessage(chatId, message, sessionKey);
-        }
-        
-        setInput('');
+    const goBack = () => {
+        setPartner(null); setChatId(null); setMessages([]);
+        setOlderMessages([]); setHasMoreMessages(false);
+        setPartnerLastRead(null); setViewerImg(null);
+        setMsgMenu(null); setReplyTo(null); setEditingId(null);
+        setTab('chats');
     };
 
-    const handleTyping = useCallback(async (text) => {
-        setInput(text);
-        if (chatId && user) {
-            await setTypingStatus(chatId, user.uid, text.length > 0);
-            
-            if (typingTimeoutRef.current) {
-                clearTimeout(typingTimeoutRef.current);
+    const closeNewChat = () => {
+        setShowNewChat(false);
+        setNewChatSearch('');
+        setUserResults([]);
+        clearTimeout(userSearchTimer.current);
+    };
+
+    const handleUserSearch = (value: string) => {
+        setNewChatSearch(value);
+        clearTimeout(userSearchTimer.current);
+        if (!value.trim()) { setUserResults([]); setSearchingUsers(false); return; }
+        setSearchingUsers(true);
+        userSearchTimer.current = setTimeout(async () => {
+            const results = await searchUsers(value, user.uid);
+            setUserResults(results);
+            setSearchingUsers(false);
+        }, 300);
+    };
+
+    const send = async () => {
+        if (!chatId || !sessionKey) return;
+        setSendErr('');
+        try {
+            // Edit mode
+            if (editingId) {
+                if (!editInput.trim()) return;
+                await editMessage(chatId, editingId, editInput.trim(), sessionKey);
+                setEditingId(null); setEditInput('');
+                return;
             }
-            
-            typingTimeoutRef.current = setTimeout(async () => {
-                await setTypingStatus(chatId, user.uid, false);
-            }, 2000);
-        }
-    }, [chatId, user]);
-
-    const handleReaction = async (messageId, emoji) => {
-        if (chatId) {
-            await addReaction(chatId, messageId, user.uid, emoji);
-            setShowReactionPicker(null);
+            if (!input.trim() && !selFile) return;
+            await setTypingStatus(chatId, user.uid, false);
+            if (partner && !chatId.startsWith('city_')) {
+                await ensureChatExists(chatId, user.uid, partner.userId);
+            }
+            if (selFile) {
+                await saveMessage(chatId, {
+                    id: generateMessageId(), text: `[File] ${selFile.name}`,
+                    senderId: user.uid, senderName: profile?.username || user.email,
+                    fileUrl: selFile.url, fileType: selFile.type, fileName: selFile.name,
+                    ...(replyTo && { replyTo }),
+                }, sessionKey);
+                setSelFile(null);
+            }
+            if (input.trim()) {
+                await saveMessage(chatId, {
+                    id: generateMessageId(), text: input,
+                    senderId: user.uid, senderName: profile?.username || user.email,
+                    ...(replyTo && { replyTo }),
+                }, sessionKey);
+            }
+            setInput('');
+            setReplyTo(null);
+            markChatAsRead(chatId, user.uid);
+        } catch (e: any) {
+            setSendErr('Ошибка отправки');
+            console.error('Send error:', e);
         }
     };
 
-    const handleFileSelect = async (e, type) => {
-        const file = e.target.files[0];
-        if (!file || !user) return;
+    const handleTyping = useCallback(async (v: string) => {
+        setInput(v);
+        if (!chatId || !user || editingId) return;
+        await setTypingStatus(chatId, user.uid, v.length > 0);
+        clearTimeout(typingTimer.current);
+        typingTimer.current = setTimeout(() => setTypingStatus(chatId!, user.uid, false), 2000);
+    }, [chatId, user, editingId]);
 
+    const handleLoadMore = async () => {
+        if (!chatId || !sessionKey || !msgCursorRef.current || loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const { msgs, hasMore, cursor } = await loadMoreMessages(chatId, sessionKey, msgCursorRef.current);
+            msgCursorRef.current = cursor;
+            setOlderMessages(prev => [...msgs, ...prev]);
+            setHasMoreMessages(hasMore);
+        } catch (e) { console.error('Load more error:', e); }
+        finally { setLoadingMore(false); }
+    };
+
+    const handleReset = async () => {
+        setAuthErr('');
+        try {
+            await sendPasswordResetEmail(auth, resetEmail);
+            setResetSent(true);
+        } catch (e: any) {
+            const errMap: Record<string, string> = {
+                'auth/user-not-found': 'Пользователь с таким email не найден',
+                'auth/invalid-email':  'Неверный формат email',
+            };
+            setAuthErr(errMap[e?.code] || 'Ошибка. Проверьте email.');
+        }
+    };
+
+    const handleCompleteLesson = async (courseId: string, idx: number) => {
+        const current = courseProgress[courseId] || [];
+        const updated = current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx];
+        setCourseProgress(prev => ({ ...prev, [courseId]: updated }));
+        await updateCourseProgress(user.uid, courseId, updated);
+    };
+
+    const handleFile = async (e: any, type: string) => {
+        const f = e.target.files?.[0];
+        if (!f || !user) return;
         if (type === 'avatar') {
-            const url = await uploadAvatar(user.uid, file);
-            setUserProfile(prev => ({ ...prev, avatar: url }));
-        } else if (type === 'status') {
-            await uploadStatus(user.uid, file, file.type.startsWith('video') ? 'video' : 'image');
-            loadStatuses();
-        } else if (type === 'chat') {
-            const url = await uploadFile(chatId, file, user.uid);
-            setSelectedFile({
-                name: file.name,
-                url,
-                type: file.type
-            });
+            const url = await uploadAvatar(user.uid, f);
+            if (url) {
+                setProfile((p: any) => ({ ...p, avatar: url }));
+                await updateUserProfile(user.uid, { avatar: url });
+            }
+        } else {
+            try {
+                const result = await uploadFile(chatId!, f, user.uid);
+                setSelFile({ name: result.name, url: result.url, type: result.type });
+            } catch (e: any) {
+                setSendErr('Ошибка загрузки файла');
+                console.error('File upload error:', e);
+            }
         }
     };
 
-    const _updateBio = async (newBio) => {
-        await updateUserProfile(user.uid, { bio: newBio });
-        setUserProfile(prev => ({ ...prev, bio: newBio }));
+    // Voice recording
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+            const mr = new MediaRecorder(stream, { mimeType });
+            audioChunksRef.current = [];
+            mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+            mr.start(100);
+            mediaRecorderRef.current = mr;
+            setIsRecording(true);
+            setRecordDuration(0);
+            recordTimerRef.current = setInterval(() => setRecordDuration(d => d + 1), 1000);
+        } catch (e) {
+            setSendErr('Нет доступа к микрофону');
+        }
     };
 
-    const addEmoji = (emoji) => {
-        setInput(prev => prev + emoji);
-        setShowEmojiPicker(false);
+    const stopRecording = async (doSend: boolean) => {
+        if (!mediaRecorderRef.current) return;
+        clearInterval(recordTimerRef.current);
+        setIsRecording(false);
+
+        if (!doSend) {
+            mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+            mediaRecorderRef.current = null;
+            setRecordDuration(0);
+            return;
+        }
+
+        const currentDuration = recordDuration;
+        await new Promise<void>(resolve => {
+            mediaRecorderRef.current!.onstop = () => resolve();
+            mediaRecorderRef.current!.stop();
+            mediaRecorderRef.current!.stream?.getTracks().forEach(t => t.stop());
+        });
+
+        const mimeType = audioChunksRef.current[0]?.type || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+        const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: mimeType });
+
+        try {
+            if (partner && !chatId!.startsWith('city_')) {
+                await ensureChatExists(chatId!, user.uid, partner.userId);
+            }
+            const result = await uploadFile(chatId!, file, user.uid);
+            await saveMessage(chatId!, {
+                id: generateMessageId(),
+                text: '',
+                senderId: user.uid,
+                senderName: profile?.username || user.email,
+                fileUrl: result.url,
+                fileType: 'audio/voice',
+                fileName: `Голосовое • ${currentDuration}с`,
+            }, sessionKey!);
+        } catch (e) {
+            setSendErr('Ошибка отправки голосового');
+        }
+        setRecordDuration(0);
+        mediaRecorderRef.current = null;
     };
 
-    if (loading) {
-        return (
+    // ── Loading ───────────────────────────────────────────────────
+    if (loading) return (
+        <div className="app">
             <div className="loading-screen">
-                <div className="loader"></div>
-                <p>Loading...</p>
+                <div className="logo-circle"><img src="/nss-icon.png" alt="NSS" /></div>
+                <div className="spinner" />
             </div>
-        );
-    }
+        </div>
+    );
 
-    if (!user) {
-        return (
-            <div className="app">
-                <div className="welcome-container">
-                    <div className="hero-glow-1"></div>
-                    <div className="hero-glow-2"></div>
-                    
-                    <div className="logo-wrap">
-                        <div className="logo-outer">
-                            <div className="logo-inner">
-                                <span className="logo-mark">L</span>
-                            </div>
-                        </div>
+    // ── Auth ──────────────────────────────────────────────────────
+    if (!user) return (
+        <div className="app">
+            <div className="auth-wrap">
+                <div className="auth-glow1" /><div className="auth-glow2" />
+
+                <div className="auth-hero">
+                    <div className="auth-nss-title">
+                        <span>НЕ</span>
+                        <span>СУЩИЙ</span>
+                        <span>СВЕТ</span>
                     </div>
+                </div>
 
-                    <div className="brand">LAVASYNC</div>
-                    <h1 className="hero-title">Private chats.<br/>Fast sync.<br/>Clean energy.</h1>
-                    <p className="hero-subtitle">
-                        E2E encrypted messenger with premium design: fast chats, calls, statuses, private dialogues.
-                    </p>
-
-                    <div className="feature-row">
-                        <div className="feature-pill"><span className="feature-pill-text">E2EE Ready UI</span></div>
-                        <div className="feature-pill"><span className="feature-pill-text">Live Status</span></div>
-                        <div className="feature-pill"><span className="feature-pill-text">Smart Sync</span></div>
-                    </div>
-
-                    <div style={{ height: 32 }}></div>
-
-                    <div className="primary-button" onClick={() => setIsLogin(true)}>
-                        <span className="primary-button-text">Войти</span>
-                    </div>
-                    <div style={{ height: 12 }}></div>
-                    <div className="primary-button ghost-button" onClick={() => setIsLogin(false)}>
-                        <span className="primary-button-text">Создать аккаунт</span>
-                    </div>
-
-                    <div className="auth-container">
-                        <h2 className="auth-title">LAVASYNC Access</h2>
-                        <p className="auth-subtitle">
-                            Minimalistic. Premium. No basement vibes.
-                        </p>
-
-                        <div className="switcher">
-                            <div 
-                                className={`switcher-item ${isLogin ? 'active' : ''}`}
-                                onClick={() => setIsLogin(true)}
-                            >
-                                <span className="switcher-text">Вход</span>
-                            </div>
-                            <div 
-                                className={`switcher-item ${!isLogin ? 'active' : ''}`}
-                                onClick={() => setIsLogin(false)}
-                            >
-                                <span className="switcher-text">Регистрация</span>
-                            </div>
-                        </div>
-
-                        <div className="auth-card">
-                            {!isLogin && (
+                <div className="auth-box">
+                    {resetMode ? (
+                        <>
+                            <div className="auth-reset-title">Сброс пароля</div>
+                            {resetSent ? (
+                                <p className="auth-reset-ok">Письмо отправлено на {resetEmail}. Проверьте почту.</p>
+                            ) : (
                                 <>
-                                    <label className="input-label">Имя</label>
-                                    <input
-                                        type="text"
-                                        className="input-field"
-                                        placeholder="Введите имя"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
-                                    />
+                                    <input className="nss-input" type="email" placeholder="Ваш Email"
+                                        value={resetEmail} onChange={e => setResetEmail(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && handleReset()} />
+                                    {authErr && <p className="auth-err">{authErr}</p>}
+                                    <button className="btn-primary" onClick={handleReset}>Отправить ссылку</button>
                                 </>
                             )}
-
-                            <label className="input-label">Email</label>
-                            <input
-                                type="email"
-                                className="input-field"
-                                placeholder="name@lava.sync"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-
-                            <label className="input-label">Пароль</label>
-                            <input
-                                type="password"
-                                className="input-field"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-
-                            {error && <p style={{ color: '#FF5C7A', marginTop: 8, fontSize: 13 }}>{error}</p>}
-
-                            <div style={{ height: 10 }}></div>
-
-                            <div className="primary-button" onClick={handleAuth}>
-                                <span className="primary-button-text">
-                                    {isLogin ? 'Войти в LAVASYNC' : 'Создать аккаунт'}
-                                </span>
+                            <button className="auth-back-link" onClick={() => { setResetMode(false); setResetSent(false); setAuthErr(''); }}>← Назад</button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="auth-tabs">
+                                <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
+                                <button className={`auth-tab${!isLogin ? ' active' : ''}`} onClick={() => setIsLogin(false)}>Регистрация</button>
                             </div>
+                            {!isLogin && (
+                                <input className="nss-input" type="text" placeholder="Имя" value={uname} onChange={e => setUname(e.target.value)} />
+                            )}
+                            <input className="nss-input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+                            <input className="nss-input" type="password" placeholder="Пароль" value={password}
+                                onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} />
+                            {authErr && <p className="auth-err">{authErr}</p>}
+                            <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
+                            {isLogin && (
+                                <button className="auth-forgot" onClick={() => { setResetMode(true); setResetEmail(email); setAuthErr(''); }}>
+                                    Забыли пароль?
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
 
-                            <div className="link-btn">
-                                <span className="link-text">
-                                    {isLogin ? 'Забыли пароль?' : 'Уже есть аккаунт?'}
-                                </span>
-                            </div>
-                        </div>
+                <div className="auth-features">
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">👥</span>
+                        <span className="auth-feat-title">Сообщество</span>
+                        <span className="auth-feat-desc">Единомышленники рядом</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">📚</span>
+                        <span className="auth-feat-title">Знания</span>
+                        <span className="auth-feat-desc">Курсы и материалы для роста</span>
+                    </div>
+                    <div className="auth-feat">
+                        <span className="auth-feat-ico">💬</span>
+                        <span className="auth-feat-title">Общение</span>
+                        <span className="auth-feat-desc">Диалоги без поверхностности</span>
                     </div>
                 </div>
             </div>
-        );
-    }
+        </div>
+    );
 
-    return (
+    // ── Chat Screen ───────────────────────────────────────────────
+    if (tab === 'chat' && partner) return (
         <div className="app">
-            {activeTab === 'chat' && currentPartner ? (
-                <div className="screen">
-                    <div className="room-header">
-                        <button className="header-back-btn" onClick={() => {
-                            setCurrentPartner(null);
-                            setChatId(null);
-                            setMessages([]);
-                        }}>
-                            <IconArrow />
-                        </button>
-                        <div className="room-header-user" onClick={() => setShowProfile(true)}>
-                            <div className="room-avatar">
-                                <span style={{ 
-                                    width: '100%', 
-                                    height: '100%', 
-                                    borderRadius: '50%', 
-                                    background: '#8B5CF6',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    color: 'white',
-                                    fontSize: 18,
-                                    fontWeight: 800
-                                }}>
-                                    {currentPartner.username?.[0] || '?'}
-                                </span>
-                                <div className="room-online"></div>
-                            </div>
-                            <div>
-                                <div className="room-name">{currentPartner.username}</div>
-                                <div className="room-status">
-                                    {typingUsers.length > 0 ? 'печатает...' : 'online'}
-                                </div>
-                            </div>
-                        </div>
-                        <button className="header-circle-btn-small">
-                            <IconCall />
-                        </button>
+            <div className="chat-screen">
+                <div className="chat-header">
+                    <button className="icon-btn" onClick={goBack}><IcoBack /></button>
+                    <div className="chat-header-ava-btn" onClick={() => setViewPartner(true)}>
+                        <Ava src={partner.avatar} name={partner.username} size={40} />
                     </div>
-
-                    <div className="messages-list">
-                        {messages.map((msg) => (
-                            <div 
-                                key={msg.id} 
-                                className={`message-row ${msg.senderId === user.uid ? 'message-row-me' : 'message-row-them'}`}
-                                onContextMenu={(e) => {
-                                    e.preventDefault();
-                                    setShowReactionPicker(msg.id);
-                                }}
-                            >
-                                <div className={`message-bubble ${msg.senderId === user.uid ? 'message-bubble-me' : 'message-bubble-them'}`}>
-                                    {msg.fileUrl && (
-                                        msg.fileType?.startsWith('image/') 
-                                            ? <img src={msg.fileUrl} alt="" className="message-image" />
-                                            : <div className="message-file">📎 {msg.text}</div>
-                                    )}
-                                    {msg.text && !msg.fileUrl && (
-                                        <span className="message-text">{msg.text}</span>
-                                    )}
-                                    <span className="message-time">
-                                        {msg.timestamp?.toLocaleTimeString?.() || msg.timestamp}
-                                    </span>
-                                </div>
-                                {msg.reactions?.length > 0 && (
-                                    <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                                        {msg.reactions.map((r, i) => (
-                                            <span key={i} style={{ 
-                                                fontSize: 14, 
-                                                background: '#11131A', 
-                                                padding: '2px 6px', 
-                                                borderRadius: 8 
-                                            }}>{r.emoji}</span>
-                                        ))}
-                                    </div>
-                                )}
-                                {showReactionPicker === msg.id && (
-                                    <div style={{ 
-                                        display: 'flex', 
-                                        gap: 4, 
-                                        marginTop: 8,
-                                        background: '#11131A',
-                                        padding: 8,
-                                        borderRadius: 20
-                                    }}>
-                                        {REACTIONS.map((emoji) => (
-                                            <button 
-                                                key={emoji}
-                                                onClick={() => handleReaction(msg.id, emoji)}
-                                                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}
-                                            >
-                                                {emoji}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {showEmojiPicker && (
-                        <div className="emoji-picker">
-                            <div className="emoji-grid">
-                                {EMOJIS.map((emoji) => (
-                                    <button key={emoji} onClick={() => addEmoji(emoji)}>
-                                        {emoji}
-                                    </button>
-                                ))}
-                            </div>
+                    <div className="chat-header-info" onClick={() => setViewPartner(true)} style={{ cursor: 'pointer' }}>
+                        <div className="chat-header-name">{partner.username}</div>
+                        <div className="chat-header-status">
+                            {typing.length > 0 ? 'печатает...' : online.some((u: any) => u.userId === partner.userId) ? 'онлайн' : 'не в сети'}
                         </div>
-                    )}
-
-                    <div className="composer-wrap">
-                        <button className="header-circle-btn" onClick={() => fileInputRef.current?.click()}>
-                            📎
-                        </button>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            accept="image/*,video/*,.pdf,.doc,.docx"
-                            style={{ display: 'none' }}
-                            onChange={(e) => handleFileSelect(e, 'chat')}
-                        />
-                        
-                        {selectedFile && (
-                            <div className="file-preview">
-                                <span>📎 {selectedFile.name}</span>
-                                <button className="remove-file" onClick={() => setSelectedFile(null)}>✕</button>
-                            </div>
-                        )}
-                        
-                        <button className="header-circle-btn" onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
-                            😊
-                        </button>
-                        
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(e) => handleTyping(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                            placeholder="Сообщение..."
-                            className="composer-input"
-                        />
-                        <button className="send-btn" onClick={sendMessage}>
-                            <IconSend />
-                        </button>
                     </div>
                 </div>
-            ) : (
-                <>
-                    <div className="screen">
-                        <div className="screen-header">
-                            <div>
-                                <div className="screen-eyebrow">LAVASYNC</div>
-                                <h1 className="screen-title">
-                                    {activeTab === 'chats' ? 'Сообщения' : activeTab === 'calls' ? 'Звонки' : 'Профиль'}
-                                </h1>
+
+                {viewPartner && (
+                    <div className="profile-overlay" onClick={() => setViewPartner(false)}>
+                        <div className="profile-sheet" onClick={e => e.stopPropagation()}>
+                            <div className="profile-sheet-ava">
+                                <Ava src={partner.avatar} name={partner.username} size={88} />
                             </div>
-                            <button className="header-circle-btn" onClick={() => setShowProfile(true)}>
-                                <span className="header-circle-btn-text">＋</span>
+                            <div className="profile-sheet-name">{partner.username}</div>
+                            <div className="profile-sheet-sub">@{(partner.username || 'user').toLowerCase().replace(/\s/g, '')}</div>
+                            <div className="profile-sheet-status">
+                                {online.some((u: any) => u.userId === partner.userId) ? '● онлайн' : 'последний раз в сети...'}
+                            </div>
+                            <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setViewPartner(false)}>
+                                Написать
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                <div className="msgs-area">
+                    {hasMoreMessages && (
+                        <div className="load-more-wrap">
+                            <button className="load-more-btn" onClick={handleLoadMore} disabled={loadingMore}>
+                                {loadingMore ? 'Загрузка...' : '⬆ Загрузить историю'}
+                            </button>
+                        </div>
+                    )}
+                    {[...olderMessages, ...messages].map(msg => (
+                        <div key={msg.id} className={`msg-row ${msg.senderId === user.uid ? 'msg-me' : 'msg-them'}`}
+                            onContextMenu={e => { e.preventDefault(); setMsgMenu({ id: msg.id, isMe: msg.senderId === user.uid, text: msg.text || '', senderName: msg.senderName || '', deleted: msg.deleted }); }}>
+                            <div className={`bubble ${msg.senderId === user.uid ? 'bubble-me' : 'bubble-them'}`}>
+                                {msg.deleted ? (
+                                    <p className="msg-deleted">Сообщение удалено</p>
+                                ) : (
+                                    <>
+                                        {msg.replyTo && (
+                                            <div className="reply-quote">
+                                                <div className="reply-quote-line" />
+                                                <div className="reply-quote-body">
+                                                    <span className="reply-quote-name">{msg.replyTo.senderName}</span>
+                                                    <span className="reply-quote-text">{(msg.replyTo.text || '').slice(0, 80)}{(msg.replyTo.text || '').length > 80 ? '…' : ''}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {msg.fileUrl && msg.fileType === 'audio/voice'
+                                            ? <AudioPlayer url={msg.fileUrl} label={msg.fileName} isMe={msg.senderId === user.uid} />
+                                            : msg.fileUrl && msg.fileType?.startsWith('image/')
+                                                ? <img src={msg.fileUrl} alt="" className="msg-img"
+                                                    style={{ cursor: 'zoom-in' }}
+                                                    onClick={() => setViewerImg(msg.fileUrl)} />
+                                                : msg.fileUrl
+                                                    ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
+                                                    : null
+                                        }
+                                        {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
+                                    </>
+                                )}
+                                <div className="bubble-footer">
+                                    <span className="bubble-time">
+                                        {msg.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''}
+                                    </span>
+                                    {msg.editedAt && !msg.deleted && <span className="msg-edited">изм.</span>}
+                                    {msg.senderId === user.uid && !chatId?.startsWith('city_') && !msg.deleted && (
+                                        <span className={`read-receipt${partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? ' seen' : ''}`}>
+                                            {partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? '✓✓' : '✓'}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            {msg.reactions?.length > 0 && !msg.deleted && (
+                                <div className="reactions-row">
+                                    {msg.reactions.map((r: any, i: number) => (
+                                        <span key={i} className="reaction">{r.emoji}</span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    <div ref={endRef} />
+                </div>
+
+                {showEmoji && (
+                    <div className="emoji-panel">
+                        {EMOJIS.map(em => <button key={em} onClick={() => { setInput(p => p + em); setShowEmoji(false); }}>{em}</button>)}
+                    </div>
+                )}
+
+                {sendErr && <div className="send-err">{sendErr}</div>}
+
+                {/* Reply / Edit bar */}
+                {(replyTo || editingId) && (
+                    <div className={`reply-bar${editingId ? ' edit-mode' : ''}`}>
+                        <div className="reply-bar-line" />
+                        <div className="reply-bar-body">
+                            <span className="reply-bar-label">{editingId ? 'Редактирование' : `↩ ${replyTo!.senderName}`}</span>
+                            <span className="reply-bar-preview">{(editingId ? editInput : replyTo!.text).slice(0, 60)}</span>
+                        </div>
+                        <button className="reply-bar-close" onClick={() => { setReplyTo(null); setEditingId(null); setEditInput(''); }}>✕</button>
+                    </div>
+                )}
+
+                {viewerImg && (
+                    <div className="img-viewer" onClick={() => setViewerImg(null)}>
+                        <img src={viewerImg} alt="" className="img-viewer-img" onClick={e => e.stopPropagation()} />
+                        <button className="img-viewer-close" onClick={() => setViewerImg(null)}>✕</button>
+                    </div>
+                )}
+
+                <div className="composer">
+                    <button className="composer-btn" onClick={() => fileRef.current?.click()}>📎</button>
+                    <input type="file" ref={fileRef} accept="image/*,video/*,.pdf,.doc,.docx" style={{ display: 'none' }} onChange={e => handleFile(e, 'chat')} />
+
+                    {isRecording ? (
+                        <div className="recording-indicator">
+                            <div className="rec-dot" />
+                            <span className="rec-time">{Math.floor(recordDuration/60).toString().padStart(2,'0')}:{(recordDuration%60).toString().padStart(2,'0')}</span>
+                            <button className="composer-btn rec-cancel" onClick={() => stopRecording(false)}>✕</button>
+                        </div>
+                    ) : (
+                        <>
+                            <button className="composer-btn" onClick={() => setShowEmoji(v => !v)}>😊</button>
+                            <button
+                                className="composer-btn"
+                                onMouseDown={startRecording}
+                                onTouchStart={e => { e.preventDefault(); startRecording(); }}
+                                onMouseUp={() => stopRecording(true)}
+                                onTouchEnd={e => { e.preventDefault(); stopRecording(true); }}
+                            >🎤</button>
+                        </>
+                    )}
+
+                    {selFile && (
+                        <div className="file-chip">
+                            <span>{selFile.name}</span>
+                            <button onClick={() => setSelFile(null)}>✕</button>
+                        </div>
+                    )}
+                    <input type="text" className="composer-input"
+                        value={editingId ? editInput : input}
+                        placeholder={editingId ? 'Редактировать...' : 'Сообщение...'}
+                        onChange={e => editingId ? setEditInput(e.target.value) : handleTyping(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && send()} />
+                    <button className="send-btn" onClick={send}><IcoSend /></button>
+                </div>
+            </div>
+        </div>
+    );
+
+    // ── Main ──────────────────────────────────────────────────────
+    return (
+        <div className="app">
+            <div className="main-wrap">
+
+                {/* CHATS */}
+                {tab === 'chats' && (
+                    <div className="page">
+                        <div className="page-hdr">
+                            <div>
+                                <div className="eyebrow">NSS</div>
+                                <h1 className="page-title">Сообщения</h1>
+                            </div>
+                            <button className="compose-btn" onClick={() => setShowNewChat(true)}>
+                                <IcoCompose />
                             </button>
                         </div>
 
-                        <div className="search-wrap">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Поиск чатов"
-                                className="search-input"
-                            />
+                        <div className="search-row">
+                            <input className="search-input" type="text" placeholder="🔍  Поиск чатов"
+                                value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                         </div>
 
-                        {activeTab === 'chats' && (
+                        {(() => {
+                            const q = searchQuery.trim().toLowerCase();
+                            const filteredOnline = q ? online.filter((u: any) => u.username?.toLowerCase().includes(q)) : online;
+                            return filteredOnline.length > 0 && (
+                            <div className="stories">
+                                {filteredOnline.map((u: any) => (
+                                    <div key={u.userId} className="story" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                        <div className="story-ava">
+                                            <Ava src={u.avatar} name={u.username} size={56} />
+                                            <div className="story-dot" />
+                                        </div>
+                                        <span className="story-name">{(u.username || '').split(' ')[0]}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        );
+                        })()}
+
+                        {!searchQuery && (
                             <>
-                                <div className="story-row">
-                                    {onlineUsers.map((u) => (
-                                        <div key={u.userId} className="story-item" onClick={() => startChat(u.userId, u.username)}>
-                                            <div className="story-avatar-wrap">
-                                                <div className="story-avatar" style={{ 
-                                                    background: '#8B5CF6',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: 20,
-                                                    fontWeight: 800
-                                                }}>
-                                                    {u.avatar 
-                                                        ? <img src={u.avatar} alt="" /> 
-                                                        : u.username?.[0] || '?'
-                                                    }
-                                                </div>
-                                                <div className="story-online"></div>
-                                            </div>
-                                            <span className="story-name">{u.username}</span>
-                                        </div>
-                                    ))}
+                                <div className="list-section" onClick={() => setCityOpen(v => !v)}>
+                                    <span>🏙 Города</span>
+                                    <span>{cityOpen ? '▲' : '▼'}</span>
                                 </div>
-
-                                <div className="chat-list">
-                                    {chats.map((chat) => {
-                                        const partner = chat.partner;
-                                        return (
-                                            <div 
-                                                key={chat.chatId} 
-                                                className="chat-card" 
-                                                onClick={() => startChat(chat.partnerId, partner?.username, partner?.avatar)}
-                                            >
-                                                <div className="avatar">
-                                                    <div style={{ 
-                                                        width: '100%', 
-                                                        height: '100%', 
-                                                        borderRadius: '50%', 
-                                                        background: '#8B5CF6',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                        color: 'white',
-                                                        fontSize: 20,
-                                                        fontWeight: 800
-                                                    }}>
-                                                        {partner?.avatar 
-                                                            ? <img src={partner.avatar} alt="" /> 
-                                                            : partner?.username?.[0] || '?'
-                                                        }
-                                                    </div>
-                                                    {partner?.status === 'online' && <div className="online-dot"></div>}
-                                                </div>
-                                                <div className="chat-mid">
-                                                    <div className="chat-top-row">
-                                                        <div className="chat-name-row">
-                                                            <span className="chat-name">{partner?.username || 'Unknown'}</span>
-                                                            {partner?.verified && (
-                                                                <div className="verified-badge">
-                                                                    <span className="verified-text">✓</span>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <span className="chat-time">
-                                                            {chat.lastMessageTime 
-                                                                ? new Date(chat.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                                : ''
-                                                            }
-                                                        </span>
-                                                    </div>
-                                                    <span className="chat-last-message">
-                                                        {chat.lastMessage || 'Нет сообщений'}
-                                                    </span>
-                                                </div>
-                                                {chat.unreadCount > 0 && (
-                                                    <div className="unread-badge">
-                                                        <span className="unread-text">{chat.unreadCount}</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-
-                                    {chats.length === 0 && onlineUsers.length > 0 && onlineUsers.map((u) => (
-                                        <div key={u.userId} className="chat-card" onClick={() => startChat(u.userId, u.username, u.avatar)}>
-                                            <div className="avatar">
-                                                <div style={{ 
-                                                    width: '100%', 
-                                                    height: '100%', 
-                                                    borderRadius: '50%', 
-                                                    background: '#8B5CF6',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    color: 'white',
-                                                    fontSize: 20,
-                                                    fontWeight: 800
-                                                }}>
-                                                    {u.avatar 
-                                                        ? <img src={u.avatar} alt="" /> 
-                                                        : u.username?.[0] || '?'
-                                                    }
-                                                </div>
-                                                <div className="online-dot"></div>
-                                            </div>
-                                            <div className="chat-mid">
-                                                <div className="chat-top-row">
-                                                    <div className="chat-name-row">
-                                                        <span className="chat-name">{u.username}</span>
-                                                    </div>
-                                                </div>
-                                                <span className="chat-last-message">Нажмите, чтобы начать чат</span>
-                                            </div>
+                                {cityOpen && CITY_CHATS.map(c => (
+                                    <div key={c.id} className="chat-row" onClick={() => startChat(`__group_${c.id}`, c.name)}>
+                                        <div className="ava city-ava" style={{ width: 52, height: 52, minWidth: 52, background: c.color }}>
+                                            <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{c.short}</span>
                                         </div>
-                                    ))}
-
-                                    {chats.length === 0 && onlineUsers.length === 0 && !searchQuery && (
-                                        <div className="no-users">
-                                            Нет чатов. Начните общение с пользователями ниже!
+                                        <div className="chat-info">
+                                            <div className="chat-row-top">
+                                                <span className="chat-name">{c.name}</span>
+                                            </div>
+                                            <span className="chat-preview">Городской чат клуба</span>
                                         </div>
-                                    )}
-
-                                    {!searchQuery && onlineUsers.length > 0 && chats.length > 0 && (
-                                        <div style={{ padding: '12px', color: '#8C93A8', fontSize: 13 }}>
-                                            Новые пользователи
-                                        </div>
-                                    )}
-                                </div>
+                                    </div>
+                                ))}
                             </>
                         )}
 
-                        {activeTab === 'calls' && (
-                            <div className="calls-wrap">
-                                <div className="chat-card">
-                                    <div className="avatar">
-                                        <div style={{ 
-                                            width: '100%', 
-                                            height: '100%', 
-                                            borderRadius: '50%', 
-                                            background: '#8B5CF6',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: 'white',
-                                            fontSize: 20,
-                                            fontWeight: 800
-                                        }}>S</div>
-                                    </div>
-                                    <div className="chat-mid">
-                                        <span className="chat-name">Sofia</span>
-                                        <span className="chat-username">Incoming video</span>
-                                        <span className="chat-time">Сегодня, 09:12</span>
-                                    </div>
-                                    <div className="call-icon-wrap">
-                                        <IconCall />
-                                    </div>
-                                </div>
+                        {(() => {
+                            const q = searchQuery.trim().toLowerCase();
+                            const filtered = q ? chats.filter((ch: any) => ch.partner?.username?.toLowerCase().includes(q)) : chats;
+                            return (
+                                <>
+                                    {filtered.length > 0 && <div className="list-section-plain">Личные чаты</div>}
+                                    {filtered.map((ch: any) => {
+                                        const p = ch.partner;
+                                        return (
+                                            <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
+                                                <Ava src={p?.avatar} name={p?.username || '?'} size={52} online={online.some((u: any) => u.userId === ch.partnerId)} />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top">
+                                                        <span className="chat-name">{p?.username || 'Пользователь'}</span>
+                                                        <span className="chat-time">
+                                                            {ch.lastMessageTime ? new Date(ch.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                        </span>
+                                                    </div>
+                                                    <div className="chat-row-bot">
+                                                        <span className="chat-preview">{ch.lastMessage || 'Нет сообщений'}</span>
+                                                        {ch.isUnread && <span className="unread-badge" />}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {q && filtered.length === 0 && (
+                                        <div className="empty-state"><p>Ничего не найдено</p></div>
+                                    )}
+                                </>
+                            );
+                        })()}
+
+                        {chats.length === 0 && online.length === 0 && !searchQuery && (
+                            <div className="empty-state">
+                                <p style={{ fontSize: 40 }}>💬</p>
+                                <p>Нет чатов</p>
                             </div>
                         )}
+                    </div>
+                )}
 
-                        {activeTab === 'profile' && (
-                            <div className="profile-wrap">
-                                <div className="profile-hero">
-                                    <div className="profile-glow"></div>
-                                    <div 
-                                        className="profile-avatar"
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        {userProfile?.avatar 
-                                            ? <img src={userProfile.avatar} alt="" /> 
-                                            : (userProfile?.username?.[0] || user.email[0])
-                                        }
-                                    </div>
-                                    <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        accept="image/*"
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => handleFileSelect(e, 'avatar')}
-                                    />
-                                    <h2 className="profile-name">{userProfile?.username || user.email}</h2>
-                                    <span className="profile-username">@{userProfile?.username?.toLowerCase().replace(/\s/g, '') || 'user'}</span>
-
-                                    <div className="stats-row">
-                                        <div className="stat-card">
-                                            <div className="stat-title">{onlineUsers.length + 5}</div>
-                                            <div className="stat-subtitle">Chats</div>
-                                        </div>
-                                        <div className="stat-card">
-                                            <div className="stat-title">3</div>
-                                            <div className="stat-subtitle">Calls</div>
-                                        </div>
-                                        <div className="stat-card">
-                                            <div className="stat-title">Pro</div>
-                                            <div className="stat-subtitle">Plan</div>
+                {/* COURSES */}
+                {tab === 'courses' && !selectedCourse && (
+                    <div className="page">
+                        <div className="page-hdr">
+                            <div>
+                                <div className="eyebrow">NSS</div>
+                                <h1 className="page-title">Курсы</h1>
+                            </div>
+                        </div>
+                        {COURSES.map((c) => {
+                            const done = (courseProgress[c.id] || []).length;
+                            const total = c.lessons.length;
+                            const pct = total > 0 ? Math.round(done / total * 100) : 0;
+                            return (
+                                <div key={c.id} className="course-card" onClick={() => setSelectedCourse(c.id)}>
+                                    <div className="course-ico" style={{ background: c.color }}>{c.icon}</div>
+                                    <div className="course-body">
+                                        <div className="course-title">{c.title}</div>
+                                        <div className="course-desc">{c.desc}</div>
+                                        <div className="course-footer">
+                                            <span className="course-lessons">{total} уроков · {pct}%</span>
+                                            <div className="progress-bar">
+                                                <div className="progress-fill" style={{ background: c.color, width: `${pct}%` }} />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
+                            );
+                        })}
+                    </div>
+                )}
 
-                                <div className="settings-card">
-                                    {['Аккаунт', 'Приватность', 'Уведомления', 'Оформление', 'Безопасность', 'Поддержка'].map(item => (
-                                        <div key={item} className="settings-row">
-                                            <span className="settings-text">{item}</span>
-                                            <IconArrow color="#8C93A8" />
+                {/* COURSE DETAIL */}
+                {tab === 'courses' && selectedCourse && (() => {
+                    const c = COURSES.find(x => x.id === selectedCourse)!;
+                    const done = courseProgress[c.id] || [];
+                    const pct = Math.round(done.length / c.lessons.length * 100);
+                    return (
+                        <div className="page">
+                            <div className="course-detail-header">
+                                <button className="icon-btn" onClick={() => setSelectedCourse(null)}><IcoBack /></button>
+                                <div className="course-detail-ico" style={{ background: c.color }}>{c.icon}</div>
+                                <div className="course-detail-info">
+                                    <div className="course-title">{c.title}</div>
+                                    <div className="course-desc">{c.desc}</div>
+                                </div>
+                            </div>
+                            <div className="course-detail-progress">
+                                <div className="course-detail-pct">{pct}% завершено · {done.length} из {c.lessons.length}</div>
+                                <div className="progress-bar" style={{ height: 6 }}>
+                                    <div className="progress-fill" style={{ background: c.color, width: `${pct}%` }} />
+                                </div>
+                            </div>
+                            <div className="lesson-list">
+                                {c.lessons.map((lesson, idx) => {
+                                    const completed = done.includes(idx);
+                                    return (
+                                        <div key={idx} className={`lesson-row${completed ? ' lesson-done' : ''}`}
+                                            onClick={() => handleCompleteLesson(c.id, idx)}>
+                                            <div className="lesson-num" style={{ background: completed ? c.color : 'var(--card2)', color: completed ? '#000' : 'var(--sub)' }}>
+                                                {completed ? '✓' : idx + 1}
+                                            </div>
+                                            <span className="lesson-title">{lesson}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })()}
+
+                {/* PROFILE */}
+                {tab === 'profile' && (
+                    <div className="page">
+                        {!user.emailVerified && (
+                            <div className="verif-banner">
+                                <span>📧 Email не подтверждён</span>
+                                <button onClick={async () => {
+                                    await sendEmailVerification(user);
+                                    setEmailVerifSent(true);
+                                }}>
+                                    {emailVerifSent ? '✓ Отправлено' : 'Подтвердить'}
+                                </button>
+                            </div>
+                        )}
+                        <div className="profile-hero">
+                            <div className="profile-glow" />
+                            <div className="profile-ava-btn" onClick={() => avaRef.current?.click()}>
+                                <Ava src={profile?.avatar} name={profile?.username || user.email} size={90} />
+                                <div className="ava-edit-badge">✏️</div>
+                            </div>
+                            <input type="file" ref={avaRef} accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e, 'avatar')} />
+                            <h2 className="profile-name">{profile?.username || user.email}</h2>
+                            <p className="profile-handle">@{(profile?.username || 'user').toLowerCase().replace(/\s/g, '')}</p>
+                            {profile?.bio && <p className="profile-bio">{profile.bio}</p>}
+                            {profile?.createdAt && (
+                                <p className="profile-registered">
+                                    Зарегистрирован: {new Date(profile.createdAt?.toDate?.() || profile.createdAt).toLocaleDateString('ru-RU')}
+                                </p>
+                            )}
+                            <button className="btn-secondary" style={{ marginTop: 10 }} onClick={() => {
+                                setEditUsername(profile?.username || '');
+                                setEditBio(profile?.bio || '');
+                                setEditProfile(true);
+                            }}>Редактировать профиль</button>
+                            <div className="profile-stats">
+                                <div className="stat"><div className="stat-val">{chats.length}</div><div className="stat-lbl">Чаты</div></div>
+                                <div className="stat"><div className="stat-val">5</div><div className="stat-lbl">Курсы</div></div>
+                                <div className="stat"><div className="stat-val">Pro</div><div className="stat-lbl">Тариф</div></div>
+                            </div>
+                        </div>
+
+                        {settingsToast && <div className="settings-toast">{settingsToast}</div>}
+
+                        <div className="settings-list">
+                            {[
+                                { ico: '👤', lbl: 'Аккаунт', action: () => { setEditUsername(profile?.username || ''); setEditBio(profile?.bio || ''); setEditProfile(true); } },
+                                { ico: '🔔', lbl: 'Уведомления', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🔒', lbl: 'Приватность', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🎨', lbl: 'Оформление', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🛡', lbl: 'Безопасность', action: () => setSettingsToast(`Ваш ID: ${user.uid.slice(0, 8)}…`) },
+                                { ico: '💬', lbl: 'Поддержка', action: () => setSettingsToast('support@nss.club') },
+                            ].map(({ ico, lbl, action }) => (
+                                <div key={lbl} className="settings-row" onClick={action}>
+                                    <span className="settings-ico">{ico}</span>
+                                    <span className="settings-lbl">{lbl}</span>
+                                    <IcoArrow />
+                                </div>
+                            ))}
+                            <div className="settings-row settings-danger" onClick={handleLogout}>
+                                <span className="settings-ico">🚪</span>
+                                <span className="settings-lbl" style={{ color: '#FF5C7A' }}>Выйти</span>
+                                <IcoArrow />
+                            </div>
+                        </div>
+
+                    </div>
+                )}
+            </div>
+
+            {/* LENTA TAB — real data from chats */}
+            {tab === 'notifs' && (
+                <div className="page" style={{position:'absolute',inset:0,top:'env(safe-area-inset-top,0px)',overflowY:'auto',background:'var(--bg)',zIndex:1,paddingBottom:'calc(88px + env(safe-area-inset-bottom,0px))'}}>
+                    <div className="page-hdr">
+                        <div>
+                            <div className="eyebrow">NSS</div>
+                            <h1 className="page-title">Лента</h1>
+                        </div>
+                    </div>
+                    {chats.length === 0 ? (
+                        <div className="empty-state">
+                            <p style={{ fontSize: 40 }}>🔔</p>
+                            <p>Нет активности</p>
+                        </div>
+                    ) : (
+                        <>
+                            {chats.filter(c => c.isUnread).length > 0 && (
+                                <>
+                                    <div className="list-section-plain">Непрочитанные</div>
+                                    {chats.filter(c => c.isUnread).map(ch => (
+                                        <div key={ch.chatId} className="notif-row notif-unread"
+                                            onClick={() => startChat(ch.partnerId, ch.partner?.username, ch.partner?.avatar)}>
+                                            <Ava src={ch.partner?.avatar} name={ch.partner?.username || '?'} size={44}
+                                                online={online.some((u:any) => u.userId === ch.partnerId)} />
+                                            <div className="notif-body">
+                                                <div className="notif-title">{ch.partner?.username || 'Пользователь'}</div>
+                                                <div className="notif-text">{ch.lastMessage}</div>
+                                            </div>
+                                            <div className="notif-meta">
+                                                <span className="notif-time">
+                                                    {ch.lastMessageTime?.toLocaleTimeString?.([], {hour:'2-digit',minute:'2-digit'}) || ''}
+                                                </span>
+                                                <div className="notif-dot" />
+                                            </div>
                                         </div>
                                     ))}
+                                </>
+                            )}
+                            <div className="list-section-plain">Последние сообщения</div>
+                            {chats.filter(c => !c.isUnread).map(ch => (
+                                <div key={ch.chatId} className="notif-row"
+                                    onClick={() => startChat(ch.partnerId, ch.partner?.username, ch.partner?.avatar)}>
+                                    <Ava src={ch.partner?.avatar} name={ch.partner?.username || '?'} size={44} />
+                                    <div className="notif-body">
+                                        <div className="notif-title">{ch.partner?.username || 'Пользователь'}</div>
+                                        <div className="notif-text">{ch.lastMessage}</div>
+                                    </div>
+                                    <div className="notif-meta">
+                                        <span className="notif-time">
+                                            {ch.lastMessageTime?.toLocaleTimeString?.([], {hour:'2-digit',minute:'2-digit'}) || ''}
+                                        </span>
+                                    </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="tab-bar">
-                        <div 
-                            className={`tab-item ${activeTab === 'chats' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('chats')}
-                        >
-                            <span className="tab-icon">💬</span>
-                            <span className="tab-label">Chats</span>
-                        </div>
-                        <div 
-                            className={`tab-item ${activeTab === 'calls' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('calls')}
-                        >
-                            <span className="tab-icon">📞</span>
-                            <span className="tab-label">Calls</span>
-                        </div>
-                        <div 
-                            className={`tab-item ${activeTab === 'profile' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('profile')}
-                        >
-                            <span className="tab-icon">👤</span>
-                            <span className="tab-label">Profile</span>
-                        </div>
-                    </div>
-                </>
+                            ))}
+                        </>
+                    )}
+                </div>
             )}
 
-            {showProfile && (
-                <div className="modal-overlay" onClick={() => setShowProfile(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="avatar-large" onClick={() => fileInputRef.current?.click()}>
-                            {userProfile?.avatar 
-                                ? <img src={userProfile.avatar} alt="" /> 
-                                : (userProfile?.username?.[0] || user.email[0])
-                            }
-                        </div>
+            {/* NEW CHAT OVERLAY */}
+            {showNewChat && (
+                <div className="new-chat-overlay">
+                    <div className="new-chat-header">
+                        <button className="icon-btn" onClick={closeNewChat}><IcoBack /></button>
                         <input
-                            type="file"
-                            ref={fileInputRef}
-                            accept="image/*"
-                            style={{ display: 'none' }}
-                            onChange={(e) => handleFileSelect(e, 'avatar')}
+                            className="new-chat-input"
+                            placeholder="Поиск пользователей..."
+                            value={newChatSearch}
+                            onChange={e => handleUserSearch(e.target.value)}
+                            autoFocus
                         />
-                        <h2 className="profile-name">{userProfile?.username || user.email}</h2>
-                        <p className="profile-username">{user.email}</p>
-
-                        <div className="theme-toggle">
-                            <span className="theme-label">{theme === 'dark' ? '🌙 Dark Mode' : '☀️ Light Mode'}</span>
-                            <div 
-                                className={`toggle-switch ${theme === 'light' ? 'active' : ''}`}
-                                onClick={toggleTheme}
-                            />
-                        </div>
-
-                        <div className="security-info">
-                            <span>🔐 E2E Encrypted</span>
-                            <code>{sessionKey?.substring(0, 16)}...</code>
-                        </div>
-
-                        <button className="close-btn" onClick={() => setShowProfile(false)}>
-                            Close
-                        </button>
+                    </div>
+                    <div className="new-chat-list">
+                        {!newChatSearch && (
+                            <>
+                                {online.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Онлайн сейчас</div>
+                                        {online.map((u: any) => (
+                                            <div key={u.userId} className="chat-row" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                                <Ava src={u.avatar} name={u.username} size={52} online />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top"><span className="chat-name">{u.username}</span></div>
+                                                    <span className="chat-preview" style={{ color: 'var(--success)' }}>онлайн</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                                {chats.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Недавние</div>
+                                        {chats.map((ch: any) => {
+                                            const p = ch.partner;
+                                            return (
+                                                <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
+                                                    <Ava src={p?.avatar} name={p?.username || '?'} size={52} />
+                                                    <div className="chat-info">
+                                                        <div className="chat-row-top"><span className="chat-name">{p?.username}</span></div>
+                                                        <span className="chat-preview">{ch.lastMessage}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </>
+                                )}
+                                {online.length === 0 && chats.length === 0 && (
+                                    <div className="empty-state"><p>Начните вводить имя для поиска</p></div>
+                                )}
+                            </>
+                        )}
+                        {newChatSearch && (
+                            <>
+                                {searchingUsers && <div className="new-chat-loading">Поиск...</div>}
+                                {!searchingUsers && userResults.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Результаты</div>
+                                        {userResults.map((u: any) => (
+                                            <div key={u.userId} className="chat-row" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                                <Ava src={u.avatar} name={u.username} size={52}
+                                                    online={online.some((o: any) => o.userId === u.userId)} />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top">
+                                                        <span className="chat-name">{u.username}</span>
+                                                        {online.some((o: any) => o.userId === u.userId) && (
+                                                            <span style={{ fontSize: 11, color: 'var(--success)' }}>онлайн</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="chat-preview">@{u.username?.toLowerCase().replace(/\s/g, '')}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                                {!searchingUsers && userResults.length === 0 && (
+                                    <div className="empty-state"><p>Пользователь не найден</p></div>
+                                )}
+                            </>
+                        )}
                     </div>
                 </div>
             )}
+
+            {/* MESSAGE MENU — bottom sheet with reactions + actions */}
+            {msgMenu && (
+                <div className="msg-menu-overlay" onClick={() => setMsgMenu(null)}>
+                    <div className="msg-menu" onClick={e => e.stopPropagation()}>
+                        {!msgMenu.deleted && (
+                            <div className="msg-menu-reactions">
+                                {REACTIONS.map(em => (
+                                    <button key={em} className="msg-menu-em" onClick={() => {
+                                        if (chatId) addReaction(chatId, msgMenu.id, user.uid, em);
+                                        setMsgMenu(null);
+                                    }}>{em}</button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="msg-menu-actions">
+                            {!msgMenu.deleted && (
+                                <button className="msg-menu-action" onClick={() => {
+                                    setReplyTo({ id: msgMenu.id, text: msgMenu.text, senderName: msgMenu.senderName });
+                                    setMsgMenu(null);
+                                }}>↩ Ответить</button>
+                            )}
+                            {msgMenu.isMe && !msgMenu.deleted && (
+                                <button className="msg-menu-action" onClick={() => {
+                                    setEditingId(msgMenu.id);
+                                    setEditInput(msgMenu.text);
+                                    setMsgMenu(null);
+                                }}>✏ Изменить</button>
+                            )}
+                            {msgMenu.isMe && (
+                                <button className="msg-menu-action msg-menu-danger" onClick={() => {
+                                    if (chatId) deleteMessage(chatId, msgMenu.id);
+                                    setMsgMenu(null);
+                                }}>🗑 Удалить</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* EDIT PROFILE OVERLAY — outside main-wrap so fixed positioning covers the bottom nav */}
+            {editProfile && (
+                <div className="profile-overlay" onClick={() => setEditProfile(false)}>
+                    <div className="profile-sheet edit-profile-sheet" onClick={e => e.stopPropagation()}>
+                        <div className="profile-sheet-name" style={{ marginBottom: 16 }}>Редактировать профиль</div>
+                        <input className="nss-input" placeholder="Имя" value={editUsername}
+                            onChange={e => setEditUsername(e.target.value)} />
+                        <input className="nss-input" placeholder="О себе" value={editBio}
+                            onChange={e => setEditBio(e.target.value)} style={{ marginTop: 10 }} />
+                        <button className="btn-primary" style={{ marginTop: 16 }} onClick={async () => {
+                            if (!editUsername.trim()) return;
+                            await updateUserProfile(user.uid, { username: editUsername.trim(), bio: editBio.trim() });
+                            setProfile((p: any) => ({ ...p, username: editUsername.trim(), bio: editBio.trim() }));
+                            setEditProfile(false);
+                        }}>Сохранить</button>
+                    </div>
+                </div>
+            )}
+
+            {/* BOTTOM NAV */}
+            <div className="bottom-nav">
+                <button className={`nav-btn${tab === 'chats' ? ' nav-active' : ''}`} onClick={() => setTab('chats')}>
+                    <span className="nav-ico">💬</span>
+                    <span className="nav-lbl">Чаты</span>
+                </button>
+                <button className={`nav-btn${tab === 'courses' ? ' nav-active' : ''}`} onClick={() => setTab('courses')}>
+                    <span className="nav-ico">📚</span>
+                    <span className="nav-lbl">Курсы</span>
+                </button>
+                <button className={`nav-btn${tab === 'notifs' ? ' nav-active' : ''}`} onClick={() => setTab('notifs')}>
+                    <span className="nav-ico" style={{ position: 'relative' }}>
+                        🔔
+                        {chats.filter(c => c.isUnread).length > 0 && (
+                            <span className="nav-badge">{chats.filter(c => c.isUnread).length}</span>
+                        )}
+                    </span>
+                    <span className="nav-lbl">Лента</span>
+                </button>
+                <button className={`nav-btn${tab === 'profile' ? ' nav-active' : ''}`} onClick={() => setTab('profile')}>
+                    <span className="nav-ico">👤</span>
+                    <span className="nav-lbl">Профиль</span>
+                </button>
+            </div>
         </div>
     );
 }
 
 export default function AppWrapper() {
-    return (
-        <ErrorBoundary>
-            <App />
-        </ErrorBoundary>
-    );
+    return <ErrorBoundary><App /></ErrorBoundary>;
 }
