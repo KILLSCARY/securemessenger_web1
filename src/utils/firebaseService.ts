@@ -323,36 +323,14 @@ export const createChat = async (user1Id: string, user2Id: string) => {
     return chatId;
 };
 
-// Real-time chat list — no orderBy so no composite index required; sorted in JS
-// Only shows chats that have at least one message (filters empty chats)
+// Real-time chat list — incremental updates via docChanges() to avoid O(n) profile reads per snapshot
 export const subscribeToChats = (userId: string, callback: (chats: any[]) => void) => {
     const q = query(collection(db, 'chats'), where('participants', 'array-contains', userId));
-    return onSnapshot(q, async (snapshot) => {
-        const chats: any[] = [];
-        for (const docSnap of snapshot.docs) {
-            const data = docSnap.data();
-            // Skip chats with no messages sent yet (lastMessageTime is set on creation, so check lastMessage)
-            if (!data.lastMessage) continue;
-            const chatId = data.chatId || docSnap.id;
-            const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
-            const partner = partnerId ? await getUserProfile(partnerId) : null;
-            const lastMsgTime = data.lastMessageTime?.toDate()?.getTime() ?? 0;
-            const lastReadTime = data.lastRead?.[userId]?.toDate()?.getTime() ?? 0;
-            const isUnread = data.lastSenderId !== userId && lastMsgTime > lastReadTime;
+    const chatMap = new Map<string, any>(); // docId → chat object
 
-            chats.push({
-                id: docSnap.id,
-                chatId,
-                partnerId,
-                partner,
-                lastMessage: data.lastMessage ?? null,
-                lastMessageTime: data.lastMessageTime?.toDate() ?? null,
-                isUnread,
-            });
-        }
-        // Deduplicate by partnerId: old auto-ID docs and new canonical sorted-ID docs can coexist
+    const emit = () => {
         const seen = new Map<string, any>();
-        for (const chat of chats) {
+        for (const chat of chatMap.values()) {
             if (!chat.partnerId) continue;
             const existing = seen.get(chat.partnerId);
             if (!existing || (chat.lastMessageTime?.getTime() ?? 0) > (existing.lastMessageTime?.getTime() ?? 0)) {
@@ -362,6 +340,44 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
         const result = Array.from(seen.values());
         result.sort((a, b) => (b.lastMessageTime?.getTime() ?? 0) - (a.lastMessageTime?.getTime() ?? 0));
         callback(result);
+    };
+
+    return onSnapshot(q, async (snapshot) => {
+        const fetches: Promise<void>[] = [];
+
+        for (const change of snapshot.docChanges()) {
+            const docSnap = change.doc;
+            const data = docSnap.data();
+
+            if (change.type === 'removed' || !data.lastMessage) {
+                chatMap.delete(docSnap.id);
+                continue;
+            }
+
+            const chatId = data.chatId || docSnap.id;
+            const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
+            const lastMsgTime = data.lastMessageTime?.toDate()?.getTime() ?? 0;
+            const lastReadTime = data.lastRead?.[userId]?.toDate()?.getTime() ?? 0;
+            const isUnread = data.lastSenderId !== userId && lastMsgTime > lastReadTime;
+
+            const entry: any = {
+                id: docSnap.id, chatId, partnerId,
+                partner: chatMap.get(docSnap.id)?.partner ?? null,
+                lastMessage: data.lastMessage ?? null,
+                lastMessageTime: data.lastMessageTime?.toDate() ?? null,
+                isUnread,
+            };
+            chatMap.set(docSnap.id, entry);
+
+            if (partnerId) {
+                fetches.push(
+                    getUserProfile(partnerId).then(p => { entry.partner = p; })
+                );
+            }
+        }
+
+        await Promise.all(fetches);
+        emit();
     }, (err) => {
         console.error('Chats subscription error:', err);
         callback([]);

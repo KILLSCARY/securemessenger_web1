@@ -261,6 +261,7 @@ function App() {
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const recordTimerRef = useRef<any>(null);
+    const lastActivityRef = useRef<number>(Date.now());
 
     // Auth
     useEffect(() => {
@@ -317,14 +318,24 @@ function App() {
 
     useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+    // Track user activity for smart heartbeat
+    useEffect(() => {
+        const touch = () => { lastActivityRef.current = Date.now(); };
+        window.addEventListener('pointerdown', touch);
+        window.addEventListener('keydown', touch);
+        return () => { window.removeEventListener('pointerdown', touch); window.removeEventListener('keydown', touch); };
+    }, []);
+
     // Real-time chats & online users — no polling
     useEffect(() => {
         if (!user) return;
         const unsubChats = subscribeToChats(user.uid, setChats);
         const unsubOnline = subscribeToOnlineUsers(user.uid, setOnline);
-        // Heartbeat: keep lastSeen fresh so we stay visible as online
+        // Heartbeat: only ping Firestore if user was active in last 5 min
         const heartbeat = setInterval(() => {
-            updateUserProfile(user.uid, { status: 'online' });
+            if (Date.now() - lastActivityRef.current < 5 * 60_000) {
+                updateUserProfile(user.uid, { status: 'online' });
+            }
         }, 90_000);
         return () => { unsubChats(); unsubOnline(); clearInterval(heartbeat); };
     }, [user]);
@@ -477,11 +488,11 @@ function App() {
 
     const handleTyping = useCallback(async (v: string) => {
         setInput(v);
-        if (!chatId || !user) return;
+        if (!chatId || !user || editingId) return;
         await setTypingStatus(chatId, user.uid, v.length > 0);
         clearTimeout(typingTimer.current);
         typingTimer.current = setTimeout(() => setTypingStatus(chatId!, user.uid, false), 2000);
-    }, [chatId, user]);
+    }, [chatId, user, editingId]);
 
     const handleLoadMore = async () => {
         if (!chatId || !sessionKey || !msgCursorRef.current || loadingMore) return;
@@ -1244,7 +1255,7 @@ function App() {
                             <div className="msg-menu-reactions">
                                 {REACTIONS.map(em => (
                                     <button key={em} className="msg-menu-em" onClick={() => {
-                                        addReaction(chatId!, msgMenu.id, user.uid, em);
+                                        if (chatId) addReaction(chatId, msgMenu.id, user.uid, em);
                                         setMsgMenu(null);
                                     }}>{em}</button>
                                 ))}
@@ -1266,7 +1277,7 @@ function App() {
                             )}
                             {msgMenu.isMe && (
                                 <button className="msg-menu-action msg-menu-danger" onClick={() => {
-                                    deleteMessage(chatId!, msgMenu.id);
+                                    if (chatId) deleteMessage(chatId, msgMenu.id);
                                     setMsgMenu(null);
                                 }}>🗑 Удалить</button>
                             )}
