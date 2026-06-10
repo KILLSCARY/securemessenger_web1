@@ -593,3 +593,81 @@ input  { font-family: inherit; }
 /* ── 4-item bottom nav ───────────────────────────────────────────── */
 .bottom-nav { padding: 0 4px; }
 .nav-btn { min-width: 0; flex: 1; }
+
+/* ── Auth: forgot password ───────────────────────────────────────── */
+.auth-forgot {
+    display: block; width: 100%; text-align: center;
+    margin-top: 14px; font-size: 13px; color: var(--sub);
+    padding: 6px; -webkit-tap-highlight-color: transparent;
+}
+.auth-forgot:active { color: var(--accent); }
+.auth-reset-title { font-size: 18px; font-weight: 900; margin-bottom: 16px; text-align: center; }
+.auth-reset-ok {
+    font-size: 14px; color: var(--success); text-align: center;
+    background: rgba(74,222,128,.08); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 12px; line-height: 1.5;
+}
+.auth-back-link {
+    display: block; width: 100%; text-align: center;
+    margin-top: 16px; font-size: 14px; color: var(--sub);
+    -webkit-tap-highlight-color: transparent;
+}
+.auth-back-link:active { color: var(--accent); }
+
+/* ── Message pagination ──────────────────────────────────────────── */
+.load-more-wrap { text-align: center; padding: 8px 0 4px; }
+.load-more-btn {
+    padding: 8px 18px; border-radius: 20px; font-size: 13px; font-weight: 700;
+    color: var(--sub); border: 1px solid var(--border);
+    background: var(--card); -webkit-tap-highlight-color: transparent;
+}
+.load-more-btn:active { opacity: .7; }
+.load-more-btn:disabled { opacity: .5; }
+
+/* ── Course detail ───────────────────────────────────────────────── */
+.course-card { cursor: pointer; }
+.course-card:active { opacity: .85; }
+.course-detail-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.course-detail-ico {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+}
+.course-detail-info { flex: 1; min-width: 0; }
+.course-detail-progress {
+    padding: 12px 20px 8px;
+    border-bottom: 1px solid var(--border);
+}
+.course-detail-pct { font-size: 12px; color: var(--sub); margin-bottom: 6px; }
+.lesson-list { padding: 8px 0 16px; }
+.lesson-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 20px; cursor: pointer;
+    transition: background .15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.lesson-row:active { background: var(--card); }
+.lesson-done .lesson-title { color: var(--sub); text-decoration: line-through; }
+.lesson-num {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; flex-shrink: 0;
+}
+.lesson-title { font-size: 14px; font-weight: 600; flex: 1; line-height: 1.4; }
+
+/* ── Email verification banner ───────────────────────────────────── */
+.verif-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 12px 20px;
+    background: rgba(234,179,8,.08); border-bottom: 1px solid rgba(234,179,8,.2);
+    font-size: 13px; color: var(--text);
+}
+.verif-banner button {
+    padding: 7px 14px; border-radius: 12px; font-size: 12px; font-weight: 800;
+    background: var(--accent); color: #000; flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+}

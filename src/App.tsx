@@ -1,16 +1,17 @@
 import { useState, useEffect, useRef, useCallback, Component } from 'react';
 import {
     createUserWithEmailAndPassword, signInWithEmailAndPassword,
-    signOut, onAuthStateChanged, updateProfile
+    signOut, onAuthStateChanged, updateProfile,
+    sendPasswordResetEmail, sendEmailVerification,
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { generateMessageId } from './utils/crypto';
 import {
     createUserProfile, getUserProfile, updateUserProfile,
-    subscribeToMessages, saveMessage, addReaction,
+    subscribeToMessages, loadMoreMessages, saveMessage, addReaction,
     uploadAvatar, getChatSessionKey, setTypingStatus,
     subscribeToTyping, subscribeToChats, ensureChatExists,
-    subscribeToOnlineUsers, uploadFile
+    subscribeToOnlineUsers, uploadFile, updateCourseProgress,
 } from './utils/firebaseService';
 import { initECDHKeys } from './utils/e2e';
 import './App.css';
@@ -44,11 +45,70 @@ const CITY_CHATS = [
     { id: 'city_krasnodar', name: 'Краснодар', short: 'КРД', color: '#EC4899' },
 ];
 const COURSES = [
-    { title: 'Продажи с нуля', lessons: 24, icon: '🎯', color: '#8B5CF6', desc: 'Скрипты, возражения, закрытие сделок' },
-    { title: 'Построение команды', lessons: 18, icon: '👥', color: '#3B82F6', desc: 'Найм, адаптация, управление отделом' },
-    { title: 'Личный бренд', lessons: 12, icon: '⭐', color: '#F59E0B', desc: 'Стать экспертом в своей нише' },
-    { title: 'Финансы бизнеса', lessons: 15, icon: '💰', color: '#10B981', desc: 'Планирование и масштабирование' },
-    { title: 'Переговоры', lessons: 20, icon: '🤝', color: '#EF4444', desc: 'Психология и техники влияния' },
+    {
+        id: 'sales', title: 'Продажи с нуля', icon: '🎯', color: '#8B5CF6',
+        desc: 'Скрипты, возражения, закрытие сделок',
+        lessons: [
+            'Что такое продажи и почему все продают',
+            'Психология покупателя: страхи и желания',
+            'Первый контакт: как начать разговор',
+            'Выявление потребностей: вопросы SPIN',
+            'Презентация ценности, а не продукта',
+            'Работа с возражениями: 5 техник',
+            'Закрытие сделки: когда и как просить',
+            'Работа с отказами: как не сгореть',
+        ],
+    },
+    {
+        id: 'team', title: 'Построение команды', icon: '👥', color: '#3B82F6',
+        desc: 'Найм, адаптация, управление отделом',
+        lessons: [
+            'Когда нужна команда и с чего начать',
+            'Профиль должности и поиск людей',
+            'Собеседование: что спрашивать',
+            'Онбординг: первые 30 дней сотрудника',
+            'Делегирование без потери качества',
+            'Мотивация: деньги и не только',
+            'Обратная связь: похвала и критика',
+            'Как и когда расставаться с людьми',
+        ],
+    },
+    {
+        id: 'brand', title: 'Личный бренд', icon: '⭐', color: '#F59E0B',
+        desc: 'Стать экспертом в своей нише',
+        lessons: [
+            'Что такое личный бренд и зачем он',
+            'Найти свою нишу и аудиторию',
+            'Упаковка: фото, биография, ценности',
+            'Контент-план: о чём говорить',
+            'Сторителлинг: как рассказывать истории',
+            'Нетворкинг: знакомства и связи',
+        ],
+    },
+    {
+        id: 'finance', title: 'Финансы бизнеса', icon: '💰', color: '#10B981',
+        desc: 'Планирование и масштабирование',
+        lessons: [
+            'Считаем деньги: P&L и баланс',
+            'Юнит-экономика: один клиент',
+            'Бюджетирование и план-факт',
+            'Инвестиции: когда и во что',
+            'Налоги для предпринимателя',
+            'Масштабирование без потери прибыли',
+        ],
+    },
+    {
+        id: 'nego', title: 'Переговоры', icon: '🤝', color: '#EF4444',
+        desc: 'Психология и техники влияния',
+        lessons: [
+            'Принципы win-win переговоров',
+            'Подготовка: интересы и BATNA',
+            'Активное слушание и эмпатия',
+            'Техники убеждения и влияния',
+            'Сложные переговоры: давление',
+            'Итог и фиксация договорённостей',
+        ],
+    },
 ];
 const NOTIFS = [
     { id: '1', ico: '💬', title: 'Новое сообщение', body: 'Александр: Привет, как дела?', time: '2 мин', unread: true },
@@ -155,6 +215,24 @@ function App() {
     const [editUsername, setEditUsername] = useState('');
     const [editBio, setEditBio] = useState('');
 
+    // Auth / reset
+    const [resetMode, setResetMode] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetSent, setResetSent] = useState(false);
+
+    // Courses
+    const [courseProgress, setCourseProgress] = useState<Record<string, number[]>>({});
+    const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+
+    // Email verification
+    const [emailVerifSent, setEmailVerifSent] = useState(false);
+
+    // Message pagination
+    const [olderMessages, setOlderMessages] = useState<any[]>([]);
+    const [hasMoreMessages, setHasMoreMessages] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const msgCursorRef = useRef<any>(null);
+
     // Voice recording state
     const [isRecording, setIsRecording] = useState(false);
     const [recordDuration, setRecordDuration] = useState(0);
@@ -187,6 +265,7 @@ function App() {
                     await updateUserProfile(fu.uid, { status: 'online' });
                 }
                 setProfile(p);
+                setCourseProgress(p?.courseProgress || {});
             } else {
                 setUser(null); setProfile(null);
             }
@@ -201,10 +280,18 @@ function App() {
         return () => window.removeEventListener('beforeunload', off);
     }, [user]);
 
-    // Messages
+    // Messages with pagination
     useEffect(() => {
+        msgCursorRef.current = null;
+        setOlderMessages([]);
+        setHasMoreMessages(false);
         if (user && chatId && sessionKey) {
-            const unsub = subscribeToMessages(chatId, sessionKey, setMessages);
+            const unsub = subscribeToMessages(chatId, sessionKey, setMessages, (hasMore, cursor) => {
+                if (!msgCursorRef.current) {
+                    msgCursorRef.current = cursor;
+                    setHasMoreMessages(hasMore);
+                }
+            });
             return () => unsub?.();
         }
         setMessages([]);
@@ -285,6 +372,7 @@ function App() {
 
     const goBack = () => {
         setPartner(null); setChatId(null); setMessages([]);
+        setOlderMessages([]); setHasMoreMessages(false);
         setTab('chats');
     };
 
@@ -325,6 +413,39 @@ function App() {
         clearTimeout(typingTimer.current);
         typingTimer.current = setTimeout(() => setTypingStatus(chatId!, user.uid, false), 2000);
     }, [chatId, user]);
+
+    const handleLoadMore = async () => {
+        if (!chatId || !sessionKey || !msgCursorRef.current || loadingMore) return;
+        setLoadingMore(true);
+        try {
+            const { msgs, hasMore, cursor } = await loadMoreMessages(chatId, sessionKey, msgCursorRef.current);
+            msgCursorRef.current = cursor;
+            setOlderMessages(prev => [...msgs, ...prev]);
+            setHasMoreMessages(hasMore);
+        } catch (e) { console.error('Load more error:', e); }
+        finally { setLoadingMore(false); }
+    };
+
+    const handleReset = async () => {
+        setAuthErr('');
+        try {
+            await sendPasswordResetEmail(auth, resetEmail);
+            setResetSent(true);
+        } catch (e: any) {
+            const errMap: Record<string, string> = {
+                'auth/user-not-found': 'Пользователь с таким email не найден',
+                'auth/invalid-email':  'Неверный формат email',
+            };
+            setAuthErr(errMap[e?.code] || 'Ошибка. Проверьте email.');
+        }
+    };
+
+    const handleCompleteLesson = async (courseId: string, idx: number) => {
+        const current = courseProgress[courseId] || [];
+        const updated = current.includes(idx) ? current.filter(i => i !== idx) : [...current, idx];
+        setCourseProgress(prev => ({ ...prev, [courseId]: updated }));
+        await updateCourseProgress(user.uid, courseId, updated);
+    };
 
     const handleFile = async (e: any, type: string) => {
         const f = e.target.files?.[0];
@@ -434,18 +555,43 @@ function App() {
                 </div>
 
                 <div className="auth-box">
-                    <div className="auth-tabs">
-                        <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
-                        <button className={`auth-tab${!isLogin ? ' active' : ''}`} onClick={() => setIsLogin(false)}>Регистрация</button>
-                    </div>
-                    {!isLogin && (
-                        <input className="nss-input" type="text" placeholder="Имя" value={uname} onChange={e => setUname(e.target.value)} />
+                    {resetMode ? (
+                        <>
+                            <div className="auth-reset-title">Сброс пароля</div>
+                            {resetSent ? (
+                                <p className="auth-reset-ok">Письмо отправлено на {resetEmail}. Проверьте почту.</p>
+                            ) : (
+                                <>
+                                    <input className="nss-input" type="email" placeholder="Ваш Email"
+                                        value={resetEmail} onChange={e => setResetEmail(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && handleReset()} />
+                                    {authErr && <p className="auth-err">{authErr}</p>}
+                                    <button className="btn-primary" onClick={handleReset}>Отправить ссылку</button>
+                                </>
+                            )}
+                            <button className="auth-back-link" onClick={() => { setResetMode(false); setResetSent(false); setAuthErr(''); }}>← Назад</button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="auth-tabs">
+                                <button className={`auth-tab${isLogin ? ' active' : ''}`} onClick={() => setIsLogin(true)}>Вход</button>
+                                <button className={`auth-tab${!isLogin ? ' active' : ''}`} onClick={() => setIsLogin(false)}>Регистрация</button>
+                            </div>
+                            {!isLogin && (
+                                <input className="nss-input" type="text" placeholder="Имя" value={uname} onChange={e => setUname(e.target.value)} />
+                            )}
+                            <input className="nss-input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+                            <input className="nss-input" type="password" placeholder="Пароль" value={password}
+                                onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} />
+                            {authErr && <p className="auth-err">{authErr}</p>}
+                            <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
+                            {isLogin && (
+                                <button className="auth-forgot" onClick={() => { setResetMode(true); setResetEmail(email); setAuthErr(''); }}>
+                                    Забыли пароль?
+                                </button>
+                            )}
+                        </>
                     )}
-                    <input className="nss-input" type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-                    <input className="nss-input" type="password" placeholder="Пароль" value={password}
-                        onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} />
-                    {authErr && <p className="auth-err">{authErr}</p>}
-                    <button className="btn-primary" onClick={handleAuth}>{isLogin ? 'Войти в NSS' : 'Создать аккаунт'}</button>
                 </div>
 
                 <div className="auth-features">
@@ -505,7 +651,14 @@ function App() {
                 )}
 
                 <div className="msgs-area">
-                    {messages.map(msg => (
+                    {hasMoreMessages && (
+                        <div className="load-more-wrap">
+                            <button className="load-more-btn" onClick={handleLoadMore} disabled={loadingMore}>
+                                {loadingMore ? 'Загрузка...' : '⬆ Загрузить историю'}
+                            </button>
+                        </div>
+                    )}
+                    {[...olderMessages, ...messages].map(msg => (
                         <div key={msg.id} className={`msg-row ${msg.senderId === user.uid ? 'msg-me' : 'msg-them'}`}
                             onContextMenu={e => { e.preventDefault(); setReactionFor(msg.id); }}>
                             <div className={`bubble ${msg.senderId === user.uid ? 'bubble-me' : 'bubble-them'}`}>
@@ -672,7 +825,7 @@ function App() {
                 )}
 
                 {/* COURSES */}
-                {tab === 'courses' && (
+                {tab === 'courses' && !selectedCourse && (
                     <div className="page">
                         <div className="page-hdr">
                             <div>
@@ -680,27 +833,82 @@ function App() {
                                 <h1 className="page-title">Курсы</h1>
                             </div>
                         </div>
-                        {COURSES.map((c, i) => (
-                            <div key={i} className="course-card">
-                                <div className="course-ico" style={{ background: c.color }}>{c.icon}</div>
-                                <div className="course-body">
-                                    <div className="course-title">{c.title}</div>
-                                    <div className="course-desc">{c.desc}</div>
-                                    <div className="course-footer">
-                                        <span className="course-lessons">{c.lessons} уроков</span>
-                                        <div className="progress-bar">
-                                            <div className="progress-fill" style={{ background: c.color }} />
+                        {COURSES.map((c) => {
+                            const done = (courseProgress[c.id] || []).length;
+                            const total = c.lessons.length;
+                            const pct = total > 0 ? Math.round(done / total * 100) : 0;
+                            return (
+                                <div key={c.id} className="course-card" onClick={() => setSelectedCourse(c.id)}>
+                                    <div className="course-ico" style={{ background: c.color }}>{c.icon}</div>
+                                    <div className="course-body">
+                                        <div className="course-title">{c.title}</div>
+                                        <div className="course-desc">{c.desc}</div>
+                                        <div className="course-footer">
+                                            <span className="course-lessons">{total} уроков · {pct}%</span>
+                                            <div className="progress-bar">
+                                                <div className="progress-fill" style={{ background: c.color, width: `${pct}%` }} />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
+
+                {/* COURSE DETAIL */}
+                {tab === 'courses' && selectedCourse && (() => {
+                    const c = COURSES.find(x => x.id === selectedCourse)!;
+                    const done = courseProgress[c.id] || [];
+                    const pct = Math.round(done.length / c.lessons.length * 100);
+                    return (
+                        <div className="page">
+                            <div className="course-detail-header">
+                                <button className="icon-btn" onClick={() => setSelectedCourse(null)}><IcoBack /></button>
+                                <div className="course-detail-ico" style={{ background: c.color }}>{c.icon}</div>
+                                <div className="course-detail-info">
+                                    <div className="course-title">{c.title}</div>
+                                    <div className="course-desc">{c.desc}</div>
+                                </div>
+                            </div>
+                            <div className="course-detail-progress">
+                                <div className="course-detail-pct">{pct}% завершено · {done.length} из {c.lessons.length}</div>
+                                <div className="progress-bar" style={{ height: 6 }}>
+                                    <div className="progress-fill" style={{ background: c.color, width: `${pct}%` }} />
+                                </div>
+                            </div>
+                            <div className="lesson-list">
+                                {c.lessons.map((lesson, idx) => {
+                                    const completed = done.includes(idx);
+                                    return (
+                                        <div key={idx} className={`lesson-row${completed ? ' lesson-done' : ''}`}
+                                            onClick={() => handleCompleteLesson(c.id, idx)}>
+                                            <div className="lesson-num" style={{ background: completed ? c.color : 'var(--card2)', color: completed ? '#000' : 'var(--sub)' }}>
+                                                {completed ? '✓' : idx + 1}
+                                            </div>
+                                            <span className="lesson-title">{lesson}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {/* PROFILE */}
                 {tab === 'profile' && (
                     <div className="page">
+                        {!user.emailVerified && (
+                            <div className="verif-banner">
+                                <span>📧 Email не подтверждён</span>
+                                <button onClick={async () => {
+                                    await sendEmailVerification(user);
+                                    setEmailVerifSent(true);
+                                }}>
+                                    {emailVerifSent ? '✓ Отправлено' : 'Подтвердить'}
+                                </button>
+                            </div>
+                        )}
                         <div className="profile-hero">
                             <div className="profile-glow" />
                             <div className="profile-ava-btn" onClick={() => avaRef.current?.click()}>

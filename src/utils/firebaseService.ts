@@ -11,7 +11,8 @@ import {
     getDocs,
     getDoc,
     limit,
-    setDoc
+    setDoc,
+    startAfter,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -148,32 +149,60 @@ export const saveMessage = async (chatId: string, message: any, sessionKey: stri
     }, { merge: true });
 };
 
-export const subscribeToMessages = (chatId: string, sessionKey: string, callback: (msgs: any[]) => void) => {
+const decodeDoc = (docSnap: any, sessionKey: string) => {
+    const data = docSnap.data();
+    return {
+        id: docSnap.id,
+        senderId:   data.senderId,
+        senderName: data.senderName,
+        text:       decryptText(data.encryptedText || '', data.iv || '', sessionKey),
+        fileUrl:    data.fileUrl  ?? null,
+        fileType:   data.fileType ?? null,
+        fileName:   data.fileName ?? null,
+        timestamp:  data.timestamp?.toDate() ?? null,
+        reactions:  data.reactions ?? [],
+        readBy:     data.readBy ?? [],
+    };
+};
+
+export const subscribeToMessages = (
+    chatId: string,
+    sessionKey: string,
+    callback: (msgs: any[]) => void,
+    onMeta?: (hasMore: boolean, oldestDoc: any) => void
+) => {
     if (!chatId || !sessionKey) { callback([]); return () => {}; }
 
-    const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('timestamp', 'asc'));
+    const q = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+    );
 
     return onSnapshot(q, (snapshot) => {
-        const msgs = snapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            return {
-                id: docSnap.id,
-                senderId:   data.senderId,
-                senderName: data.senderName,
-                text:       decryptText(data.encryptedText || '', data.iv || '', sessionKey),
-                fileUrl:    data.fileUrl  ?? null,
-                fileType:   data.fileType ?? null,
-                fileName:   data.fileName ?? null,
-                timestamp:  data.timestamp?.toDate() ?? null,
-                reactions:  data.reactions ?? [],
-                readBy:     data.readBy ?? [],
-            };
-        });
+        const msgs = snapshot.docs.map(d => decodeDoc(d, sessionKey)).reverse();
+        if (onMeta) {
+            const oldest = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+            onMeta(snapshot.docs.length >= 50, oldest);
+        }
         callback(msgs);
     }, (err) => {
         console.error('Messages subscription error:', err);
         callback([]);
     });
+};
+
+export const loadMoreMessages = async (chatId: string, sessionKey: string, oldestDoc: any) => {
+    const q = query(
+        collection(db, 'chats', chatId, 'messages'),
+        orderBy('timestamp', 'desc'),
+        startAfter(oldestDoc),
+        limit(50)
+    );
+    const snapshot = await getDocs(q);
+    const msgs = snapshot.docs.map(d => decodeDoc(d, sessionKey)).reverse();
+    const cursor = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+    return { msgs, hasMore: snapshot.docs.length >= 50, cursor };
 };
 
 export const addReaction = async (chatId: string, messageId: string, userId: string, emoji: string) => {
@@ -189,6 +218,18 @@ export const addReaction = async (chatId: string, messageId: string, userId: str
         }
     } catch (error) {
         console.error('Error adding reaction:', error);
+    }
+};
+
+export const updateCourseProgress = async (userId: string, courseId: string, completedLessons: number[]) => {
+    try {
+        await updateDoc(doc(db, 'users', userId), {
+            [`courseProgress.${courseId}`]: completedLessons,
+            lastSeen: serverTimestamp(),
+        });
+        profileCache.delete(userId);
+    } catch (e) {
+        console.error('Error updating course progress:', e);
     }
 };
 
