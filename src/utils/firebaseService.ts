@@ -146,6 +146,7 @@ export const saveMessage = async (chatId: string, message: any, sessionKey: stri
         chatId,
         lastMessage: message.fileUrl ? `📎 ${message.fileName || 'Файл'}` : (message.text || '').substring(0, 60),
         lastMessageTime: serverTimestamp(),
+        lastSenderId: message.senderId,
     }, { merge: true });
 };
 
@@ -221,6 +222,14 @@ export const addReaction = async (chatId: string, messageId: string, userId: str
     }
 };
 
+export const markChatAsRead = async (chatId: string, userId: string) => {
+    try {
+        await updateDoc(doc(db, 'chats', chatId), {
+            [`lastRead.${userId}`]: serverTimestamp(),
+        });
+    } catch { /* chat doc may not exist yet */ }
+};
+
 export const updateCourseProgress = async (userId: string, courseId: string, completedLessons: number[]) => {
     try {
         await updateDoc(doc(db, 'users', userId), {
@@ -273,6 +282,10 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
             const chatId = data.chatId || docSnap.id;
             const partnerId = data.participants?.find((p: string) => p !== userId) ?? null;
             const partner = partnerId ? await getUserProfile(partnerId) : null;
+            const lastMsgTime = data.lastMessageTime?.toDate()?.getTime() ?? 0;
+            const lastReadTime = data.lastRead?.[userId]?.toDate()?.getTime() ?? 0;
+            const isUnread = data.lastSenderId !== userId && lastMsgTime > lastReadTime;
+
             chats.push({
                 id: docSnap.id,
                 chatId,
@@ -280,7 +293,7 @@ export const subscribeToChats = (userId: string, callback: (chats: any[]) => voi
                 partner,
                 lastMessage: data.lastMessage ?? null,
                 lastMessageTime: data.lastMessageTime?.toDate() ?? null,
-                unreadCount: 0,
+                isUnread,
             });
         }
         // Deduplicate by partnerId: old auto-ID docs and new canonical sorted-ID docs can coexist

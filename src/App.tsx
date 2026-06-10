@@ -12,6 +12,7 @@ import {
     uploadAvatar, getChatSessionKey, setTypingStatus,
     subscribeToTyping, subscribeToChats, ensureChatExists,
     subscribeToOnlineUsers, uploadFile, updateCourseProgress,
+    markChatAsRead,
 } from './utils/firebaseService';
 import { initECDHKeys } from './utils/e2e';
 import './App.css';
@@ -206,6 +207,8 @@ function App() {
     const [typing, setTyping] = useState<any[]>([]);
 
     const [tab, setTab] = useState('chats');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [settingsToast, setSettingsToast] = useState('');
     const [showEmoji, setShowEmoji] = useState(false);
     const [reactionFor, setReactionFor] = useState<string | null>(null);
     const [cityOpen, setCityOpen] = useState(true);
@@ -318,6 +321,13 @@ function App() {
         return () => clearTimeout(t);
     }, [sendErr]);
 
+    // Auto-clear settings toast
+    useEffect(() => {
+        if (!settingsToast) return;
+        const t = setTimeout(() => setSettingsToast(''), 2500);
+        return () => clearTimeout(t);
+    }, [settingsToast]);
+
     // Typing
     useEffect(() => {
         if (!chatId || !user) { setTyping([]); return; }
@@ -361,13 +371,14 @@ function App() {
 
     const startChat = async (pid: string, pname: string, pava: any = null) => {
         const isGroup = pid.startsWith('__group_');
-        // Compute chatId without creating the Firestore doc — doc is created lazily on first send
         const cid = isGroup ? pid.replace('__group_', '') : [user.uid, pid].sort().join('_');
         const key = await getChatSessionKey(cid, user.uid, isGroup ? undefined : pid);
         setChatId(cid);
         setSessionKey(key);
         setPartner({ userId: pid, username: pname, avatar: pava });
+        setSearchQuery('');
         setTab('chat');
+        markChatAsRead(cid, user.uid);
     };
 
     const goBack = () => {
@@ -400,6 +411,7 @@ function App() {
                 }, sessionKey);
             }
             setInput('');
+            markChatAsRead(chatId, user.uid);
         } catch (e: any) {
             setSendErr('Ошибка отправки');
             console.error('Send error:', e);
@@ -756,12 +768,16 @@ function App() {
                         </div>
 
                         <div className="search-row">
-                            <input className="search-input" type="text" placeholder="🔍  Поиск чатов" />
+                            <input className="search-input" type="text" placeholder="🔍  Поиск чатов"
+                                value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                         </div>
 
-                        {online.length > 0 && (
+                        {(() => {
+                            const q = searchQuery.trim().toLowerCase();
+                            const filteredOnline = q ? online.filter((u: any) => u.username?.toLowerCase().includes(q)) : online;
+                            return filteredOnline.length > 0 && (
                             <div className="stories">
-                                {online.map((u: any) => (
+                                {filteredOnline.map((u: any) => (
                                     <div key={u.userId} className="story" onClick={() => startChat(u.userId, u.username, u.avatar)}>
                                         <div className="story-ava">
                                             <Ava src={u.avatar} name={u.username} size={56} />
@@ -771,51 +787,65 @@ function App() {
                                     </div>
                                 ))}
                             </div>
+                        );
+                        })()}
+
+                        {!searchQuery && (
+                            <>
+                                <div className="list-section" onClick={() => setCityOpen(v => !v)}>
+                                    <span>🏙 Города</span>
+                                    <span>{cityOpen ? '▲' : '▼'}</span>
+                                </div>
+                                {cityOpen && CITY_CHATS.map(c => (
+                                    <div key={c.id} className="chat-row" onClick={() => startChat(`__group_${c.id}`, c.name)}>
+                                        <div className="ava city-ava" style={{ width: 52, height: 52, minWidth: 52, background: c.color }}>
+                                            <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{c.short}</span>
+                                        </div>
+                                        <div className="chat-info">
+                                            <div className="chat-row-top">
+                                                <span className="chat-name">{c.name}</span>
+                                            </div>
+                                            <span className="chat-preview">Городской чат клуба</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
                         )}
 
-                        <div className="list-section" onClick={() => setCityOpen(v => !v)}>
-                            <span>🏙 Города</span>
-                            <span>{cityOpen ? '▲' : '▼'}</span>
-                        </div>
-
-                        {cityOpen && CITY_CHATS.map(c => (
-                            <div key={c.id} className="chat-row" onClick={() => startChat(`__group_${c.id}`, c.name)}>
-                                <div className="ava city-ava" style={{ width: 52, height: 52, minWidth: 52, background: c.color }}>
-                                    <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{c.short}</span>
-                                </div>
-                                <div className="chat-info">
-                                    <div className="chat-row-top">
-                                        <span className="chat-name">{c.name}</span>
-                                    </div>
-                                    <span className="chat-preview">Городской чат клуба</span>
-                                </div>
-                            </div>
-                        ))}
-
-                        {chats.length > 0 && <div className="list-section-plain">Личные чаты</div>}
-
-                        {chats.map((ch: any) => {
-                            const p = ch.partner;
+                        {(() => {
+                            const q = searchQuery.trim().toLowerCase();
+                            const filtered = q ? chats.filter((ch: any) => ch.partner?.username?.toLowerCase().includes(q)) : chats;
                             return (
-                                <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
-                                    <Ava src={p?.avatar} name={p?.username || '?'} size={52} online={p?.status === 'online'} />
-                                    <div className="chat-info">
-                                        <div className="chat-row-top">
-                                            <span className="chat-name">{p?.username || 'Пользователь'}</span>
-                                            <span className="chat-time">
-                                                {ch.lastMessageTime ? new Date(ch.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                                            </span>
-                                        </div>
-                                        <div className="chat-row-bot">
-                                            <span className="chat-preview">{ch.lastMessage || 'Нет сообщений'}</span>
-                                            {ch.unreadCount > 0 && <span className="unread">{ch.unreadCount}</span>}
-                                        </div>
-                                    </div>
-                                </div>
+                                <>
+                                    {filtered.length > 0 && <div className="list-section-plain">Личные чаты</div>}
+                                    {filtered.map((ch: any) => {
+                                        const p = ch.partner;
+                                        return (
+                                            <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
+                                                <Ava src={p?.avatar} name={p?.username || '?'} size={52} online={online.some((u: any) => u.userId === ch.partnerId)} />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top">
+                                                        <span className="chat-name">{p?.username || 'Пользователь'}</span>
+                                                        <span className="chat-time">
+                                                            {ch.lastMessageTime ? new Date(ch.lastMessageTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                        </span>
+                                                    </div>
+                                                    <div className="chat-row-bot">
+                                                        <span className="chat-preview">{ch.lastMessage || 'Нет сообщений'}</span>
+                                                        {ch.isUnread && <span className="unread-badge" />}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {q && filtered.length === 0 && (
+                                        <div className="empty-state"><p>Ничего не найдено</p></div>
+                                    )}
+                                </>
                             );
-                        })}
+                        })()}
 
-                        {chats.length === 0 && online.length === 0 && (
+                        {chats.length === 0 && online.length === 0 && !searchQuery && (
                             <div className="empty-state">
                                 <p style={{ fontSize: 40 }}>💬</p>
                                 <p>Нет чатов</p>
@@ -936,16 +966,18 @@ function App() {
                             </div>
                         </div>
 
+                        {settingsToast && <div className="settings-toast">{settingsToast}</div>}
+
                         <div className="settings-list">
                             {[
-                                ['👤', 'Аккаунт'],
-                                ['🔔', 'Уведомления'],
-                                ['🔒', 'Приватность'],
-                                ['🎨', 'Оформление'],
-                                ['🛡', 'Безопасность'],
-                                ['💬', 'Поддержка'],
-                            ].map(([ico, lbl]) => (
-                                <div key={lbl} className="settings-row">
+                                { ico: '👤', lbl: 'Аккаунт', action: () => { setEditUsername(profile?.username || ''); setEditBio(profile?.bio || ''); setEditProfile(true); } },
+                                { ico: '🔔', lbl: 'Уведомления', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🔒', lbl: 'Приватность', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🎨', lbl: 'Оформление', action: () => setSettingsToast('Скоро доступно') },
+                                { ico: '🛡', lbl: 'Безопасность', action: () => setSettingsToast(`Ваш ID: ${user.uid.slice(0, 8)}…`) },
+                                { ico: '💬', lbl: 'Поддержка', action: () => setSettingsToast('support@nss.club') },
+                            ].map(({ ico, lbl, action }) => (
+                                <div key={lbl} className="settings-row" onClick={action}>
                                     <span className="settings-ico">{ico}</span>
                                     <span className="settings-lbl">{lbl}</span>
                                     <IcoArrow />
