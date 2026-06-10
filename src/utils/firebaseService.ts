@@ -162,6 +162,7 @@ export const saveMessage = async (chatId: string, message: any, sessionKey: stri
     if (message.fileUrl)  messageDoc.fileUrl  = message.fileUrl;
     if (message.fileType) messageDoc.fileType = message.fileType;
     if (message.fileName) messageDoc.fileName = message.fileName;
+    if (message.replyTo)  messageDoc.replyTo  = message.replyTo;
 
     await addDoc(collection(db, 'chats', chatId, 'messages'), messageDoc);
 
@@ -179,13 +180,16 @@ const decodeDoc = (docSnap: any, sessionKey: string) => {
         id: docSnap.id,
         senderId:   data.senderId,
         senderName: data.senderName,
-        text:       decryptText(data.encryptedText || '', data.iv || '', sessionKey),
+        text:       data.deleted ? '' : decryptText(data.encryptedText || '', data.iv || '', sessionKey),
         fileUrl:    data.fileUrl  ?? null,
         fileType:   data.fileType ?? null,
         fileName:   data.fileName ?? null,
         timestamp:  data.timestamp?.toDate() ?? null,
         reactions:  data.reactions ?? [],
         readBy:     data.readBy ?? [],
+        deleted:    data.deleted  ?? false,
+        editedAt:   data.editedAt?.toDate() ?? null,
+        replyTo:    data.replyTo  ?? null,
     };
 };
 
@@ -251,6 +255,25 @@ export const subscribeToChatDoc = (chatId: string, callback: (data: any) => void
     }, (err) => {
         console.error('Chat doc error:', err);
     });
+};
+
+export const deleteMessage = async (chatId: string, messageId: string) => {
+    try {
+        await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+            deleted: true, encryptedText: '', iv: '',
+        });
+    } catch (e) { console.error('Delete message error:', e); }
+};
+
+export const editMessage = async (chatId: string, messageId: string, newText: string, sessionKey: string) => {
+    try {
+        const encrypted = encryptText(newText, sessionKey);
+        await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+            encryptedText: encrypted.ciphertext,
+            iv: encrypted.iv,
+            editedAt: serverTimestamp(),
+        });
+    } catch (e) { console.error('Edit message error:', e); }
 };
 
 export const markChatAsRead = async (chatId: string, userId: string) => {

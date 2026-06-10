@@ -13,6 +13,7 @@ import {
     subscribeToTyping, subscribeToChats, ensureChatExists,
     subscribeToOnlineUsers, uploadFile, updateCourseProgress,
     markChatAsRead, searchUsers, subscribeToChatDoc,
+    deleteMessage, editMessage,
 } from './utils/firebaseService';
 import { initECDHKeys } from './utils/e2e';
 import './App.css';
@@ -110,13 +111,6 @@ const COURSES = [
             'Итог и фиксация договорённостей',
         ],
     },
-];
-const NOTIFS = [
-    { id: '1', ico: '💬', title: 'Новое сообщение', body: 'Александр: Привет, как дела?', time: '2 мин', unread: true },
-    { id: '2', ico: '📚', title: 'Новый урок', body: 'Продажи с нуля: Урок 4 доступен', time: '1 ч', unread: true },
-    { id: '3', ico: '🏆', title: 'Клуб NSS', body: 'Встреча в Москве — 15 июня', time: '3 ч', unread: false },
-    { id: '4', ico: '🔥', title: 'Новый курс', body: 'Построение команды — старт открыт', time: 'вчера', unread: false },
-    { id: '5', ico: '💰', title: 'Тариф', body: 'Ваша подписка NSS Pro активна', time: '2 дня', unread: false },
 ];
 
 // ── AudioPlayer ───────────────────────────────────────────────────
@@ -223,7 +217,10 @@ function App() {
     const [searchingUsers, setSearchingUsers] = useState(false);
     const userSearchTimer = useRef<any>(null);
     const [showEmoji, setShowEmoji] = useState(false);
-    const [reactionFor, setReactionFor] = useState<string | null>(null);
+    const [msgMenu, setMsgMenu] = useState<{ id: string; isMe: boolean; text: string; senderName: string; deleted?: boolean } | null>(null);
+    const [replyTo, setReplyTo] = useState<{ id: string; text: string; senderName: string } | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editInput, setEditInput] = useState('');
     const [cityOpen, setCityOpen] = useState(true);
     const [viewPartner, setViewPartner] = useState(false);
     const [sendErr, setSendErr] = useState('');
@@ -414,6 +411,7 @@ function App() {
         setPartner(null); setChatId(null); setMessages([]);
         setOlderMessages([]); setHasMoreMessages(false);
         setPartnerLastRead(null); setViewerImg(null);
+        setMsgMenu(null); setReplyTo(null); setEditingId(null);
         setTab('chats');
     };
 
@@ -437,11 +435,18 @@ function App() {
     };
 
     const send = async () => {
-        if ((!input.trim() && !selFile) || !chatId || !sessionKey) return;
+        if (!chatId || !sessionKey) return;
         setSendErr('');
         try {
+            // Edit mode
+            if (editingId) {
+                if (!editInput.trim()) return;
+                await editMessage(chatId, editingId, editInput.trim(), sessionKey);
+                setEditingId(null); setEditInput('');
+                return;
+            }
+            if (!input.trim() && !selFile) return;
             await setTypingStatus(chatId, user.uid, false);
-            // Ensure chat doc exists before first message (non-group chats)
             if (partner && !chatId.startsWith('city_')) {
                 await ensureChatExists(chatId, user.uid, partner.userId);
             }
@@ -450,6 +455,7 @@ function App() {
                     id: generateMessageId(), text: `[File] ${selFile.name}`,
                     senderId: user.uid, senderName: profile?.username || user.email,
                     fileUrl: selFile.url, fileType: selFile.type, fileName: selFile.name,
+                    ...(replyTo && { replyTo }),
                 }, sessionKey);
                 setSelFile(null);
             }
@@ -457,9 +463,11 @@ function App() {
                 await saveMessage(chatId, {
                     id: generateMessageId(), text: input,
                     senderId: user.uid, senderName: profile?.username || user.email,
+                    ...(replyTo && { replyTo }),
                 }, sessionKey);
             }
             setInput('');
+            setReplyTo(null);
             markChatAsRead(chatId, user.uid);
         } catch (e: any) {
             setSendErr('Ошибка отправки');
@@ -721,43 +729,51 @@ function App() {
                     )}
                     {[...olderMessages, ...messages].map(msg => (
                         <div key={msg.id} className={`msg-row ${msg.senderId === user.uid ? 'msg-me' : 'msg-them'}`}
-                            onContextMenu={e => { e.preventDefault(); setReactionFor(msg.id); }}>
+                            onContextMenu={e => { e.preventDefault(); setMsgMenu({ id: msg.id, isMe: msg.senderId === user.uid, text: msg.text || '', senderName: msg.senderName || '', deleted: msg.deleted }); }}>
                             <div className={`bubble ${msg.senderId === user.uid ? 'bubble-me' : 'bubble-them'}`}>
-                                {msg.fileUrl && msg.fileType === 'audio/voice'
-                                    ? <AudioPlayer url={msg.fileUrl} label={msg.fileName} isMe={msg.senderId === user.uid} />
-                                    : msg.fileUrl && msg.fileType?.startsWith('image/')
-                                        ? <img src={msg.fileUrl} alt="" className="msg-img"
-                                            style={{ cursor: 'zoom-in' }}
-                                            onClick={() => setViewerImg(msg.fileUrl)} />
-                                        : msg.fileUrl
-                                            ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
-                                            : null
-                                }
-                                {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
+                                {msg.deleted ? (
+                                    <p className="msg-deleted">Сообщение удалено</p>
+                                ) : (
+                                    <>
+                                        {msg.replyTo && (
+                                            <div className="reply-quote">
+                                                <div className="reply-quote-line" />
+                                                <div className="reply-quote-body">
+                                                    <span className="reply-quote-name">{msg.replyTo.senderName}</span>
+                                                    <span className="reply-quote-text">{(msg.replyTo.text || '').slice(0, 80)}{(msg.replyTo.text || '').length > 80 ? '…' : ''}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {msg.fileUrl && msg.fileType === 'audio/voice'
+                                            ? <AudioPlayer url={msg.fileUrl} label={msg.fileName} isMe={msg.senderId === user.uid} />
+                                            : msg.fileUrl && msg.fileType?.startsWith('image/')
+                                                ? <img src={msg.fileUrl} alt="" className="msg-img"
+                                                    style={{ cursor: 'zoom-in' }}
+                                                    onClick={() => setViewerImg(msg.fileUrl)} />
+                                                : msg.fileUrl
+                                                    ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
+                                                    : null
+                                        }
+                                        {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
+                                    </>
+                                )}
                                 <div className="bubble-footer">
                                     <span className="bubble-time">
                                         {msg.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''}
                                     </span>
-                                    {msg.senderId === user.uid && !chatId?.startsWith('city_') && (
+                                    {msg.editedAt && !msg.deleted && <span className="msg-edited">изм.</span>}
+                                    {msg.senderId === user.uid && !chatId?.startsWith('city_') && !msg.deleted && (
                                         <span className={`read-receipt${partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? ' seen' : ''}`}>
                                             {partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? '✓✓' : '✓'}
                                         </span>
                                     )}
                                 </div>
                             </div>
-                            {msg.reactions?.length > 0 && (
+                            {msg.reactions?.length > 0 && !msg.deleted && (
                                 <div className="reactions-row">
                                     {msg.reactions.map((r: any, i: number) => (
                                         <span key={i} className="reaction">{r.emoji}</span>
                                     ))}
-                                </div>
-                            )}
-                            {reactionFor === msg.id && (
-                                <div className="reaction-picker">
-                                    {REACTIONS.map(em => (
-                                        <button key={em} onClick={() => { addReaction(chatId!, msg.id, user.uid, em); setReactionFor(null); }}>{em}</button>
-                                    ))}
-                                    <button onClick={() => setReactionFor(null)} style={{ opacity: 0.5 }}>✕</button>
                                 </div>
                             )}
                         </div>
@@ -772,6 +788,18 @@ function App() {
                 )}
 
                 {sendErr && <div className="send-err">{sendErr}</div>}
+
+                {/* Reply / Edit bar */}
+                {(replyTo || editingId) && (
+                    <div className={`reply-bar${editingId ? ' edit-mode' : ''}`}>
+                        <div className="reply-bar-line" />
+                        <div className="reply-bar-body">
+                            <span className="reply-bar-label">{editingId ? 'Редактирование' : `↩ ${replyTo!.senderName}`}</span>
+                            <span className="reply-bar-preview">{(editingId ? editInput : replyTo!.text).slice(0, 60)}</span>
+                        </div>
+                        <button className="reply-bar-close" onClick={() => { setReplyTo(null); setEditingId(null); setEditInput(''); }}>✕</button>
+                    </div>
+                )}
 
                 {viewerImg && (
                     <div className="img-viewer" onClick={() => setViewerImg(null)}>
@@ -809,8 +837,11 @@ function App() {
                             <button onClick={() => setSelFile(null)}>✕</button>
                         </div>
                     )}
-                    <input type="text" className="composer-input" value={input} placeholder="Сообщение..."
-                        onChange={e => handleTyping(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
+                    <input type="text" className="composer-input"
+                        value={editingId ? editInput : input}
+                        placeholder={editingId ? 'Редактировать...' : 'Сообщение...'}
+                        onChange={e => editingId ? setEditInput(e.target.value) : handleTyping(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && send()} />
                     <button className="send-btn" onClick={send}><IcoSend /></button>
                 </div>
             </div>
@@ -1062,30 +1093,62 @@ function App() {
                 )}
             </div>
 
-            {/* NOTIFICATIONS TAB */}
+            {/* LENTA TAB — real data from chats */}
             {tab === 'notifs' && (
-                <div className="page" style={{position:'absolute',inset:0,top:'env(safe-area-inset-top,0px)',overflowY:'auto',background:'var(--bg)',zIndex:1}}>
+                <div className="page" style={{position:'absolute',inset:0,top:'env(safe-area-inset-top,0px)',overflowY:'auto',background:'var(--bg)',zIndex:1,paddingBottom:'calc(88px + env(safe-area-inset-bottom,0px))'}}>
                     <div className="page-hdr">
                         <div>
                             <div className="eyebrow">NSS</div>
-                            <h1 className="page-title">Уведомления</h1>
+                            <h1 className="page-title">Лента</h1>
                         </div>
                     </div>
-                    {NOTIFS.map(n => (
-                        <div key={n.id} className={`notif-row${n.unread ? ' notif-unread' : ''}`}>
-                            <div className="notif-ico-wrap">
-                                <span className="notif-ico">{n.ico}</span>
-                            </div>
-                            <div className="notif-body">
-                                <div className="notif-title">{n.title}</div>
-                                <div className="notif-text">{n.body}</div>
-                            </div>
-                            <div className="notif-meta">
-                                <span className="notif-time">{n.time}</span>
-                                {n.unread && <div className="notif-dot" />}
-                            </div>
+                    {chats.length === 0 ? (
+                        <div className="empty-state">
+                            <p style={{ fontSize: 40 }}>🔔</p>
+                            <p>Нет активности</p>
                         </div>
-                    ))}
+                    ) : (
+                        <>
+                            {chats.filter(c => c.isUnread).length > 0 && (
+                                <>
+                                    <div className="list-section-plain">Непрочитанные</div>
+                                    {chats.filter(c => c.isUnread).map(ch => (
+                                        <div key={ch.chatId} className="notif-row notif-unread"
+                                            onClick={() => startChat(ch.partnerId, ch.partner?.username, ch.partner?.avatar)}>
+                                            <Ava src={ch.partner?.avatar} name={ch.partner?.username || '?'} size={44}
+                                                online={online.some((u:any) => u.userId === ch.partnerId)} />
+                                            <div className="notif-body">
+                                                <div className="notif-title">{ch.partner?.username || 'Пользователь'}</div>
+                                                <div className="notif-text">{ch.lastMessage}</div>
+                                            </div>
+                                            <div className="notif-meta">
+                                                <span className="notif-time">
+                                                    {ch.lastMessageTime?.toLocaleTimeString?.([], {hour:'2-digit',minute:'2-digit'}) || ''}
+                                                </span>
+                                                <div className="notif-dot" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+                            <div className="list-section-plain">Последние сообщения</div>
+                            {chats.filter(c => !c.isUnread).map(ch => (
+                                <div key={ch.chatId} className="notif-row"
+                                    onClick={() => startChat(ch.partnerId, ch.partner?.username, ch.partner?.avatar)}>
+                                    <Ava src={ch.partner?.avatar} name={ch.partner?.username || '?'} size={44} />
+                                    <div className="notif-body">
+                                        <div className="notif-title">{ch.partner?.username || 'Пользователь'}</div>
+                                        <div className="notif-text">{ch.lastMessage}</div>
+                                    </div>
+                                    <div className="notif-meta">
+                                        <span className="notif-time">
+                                            {ch.lastMessageTime?.toLocaleTimeString?.([], {hour:'2-digit',minute:'2-digit'}) || ''}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </>
+                    )}
                 </div>
             )}
 
@@ -1173,6 +1236,45 @@ function App() {
                 </div>
             )}
 
+            {/* MESSAGE MENU — bottom sheet with reactions + actions */}
+            {msgMenu && (
+                <div className="msg-menu-overlay" onClick={() => setMsgMenu(null)}>
+                    <div className="msg-menu" onClick={e => e.stopPropagation()}>
+                        {!msgMenu.deleted && (
+                            <div className="msg-menu-reactions">
+                                {REACTIONS.map(em => (
+                                    <button key={em} className="msg-menu-em" onClick={() => {
+                                        addReaction(chatId!, msgMenu.id, user.uid, em);
+                                        setMsgMenu(null);
+                                    }}>{em}</button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="msg-menu-actions">
+                            {!msgMenu.deleted && (
+                                <button className="msg-menu-action" onClick={() => {
+                                    setReplyTo({ id: msgMenu.id, text: msgMenu.text, senderName: msgMenu.senderName });
+                                    setMsgMenu(null);
+                                }}>↩ Ответить</button>
+                            )}
+                            {msgMenu.isMe && !msgMenu.deleted && (
+                                <button className="msg-menu-action" onClick={() => {
+                                    setEditingId(msgMenu.id);
+                                    setEditInput(msgMenu.text);
+                                    setMsgMenu(null);
+                                }}>✏ Изменить</button>
+                            )}
+                            {msgMenu.isMe && (
+                                <button className="msg-menu-action msg-menu-danger" onClick={() => {
+                                    deleteMessage(chatId!, msgMenu.id);
+                                    setMsgMenu(null);
+                                }}>🗑 Удалить</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* EDIT PROFILE OVERLAY — outside main-wrap so fixed positioning covers the bottom nav */}
             {editProfile && (
                 <div className="profile-overlay" onClick={() => setEditProfile(false)}>
@@ -1203,7 +1305,12 @@ function App() {
                     <span className="nav-lbl">Курсы</span>
                 </button>
                 <button className={`nav-btn${tab === 'notifs' ? ' nav-active' : ''}`} onClick={() => setTab('notifs')}>
-                    <span className="nav-ico">🔔</span>
+                    <span className="nav-ico" style={{ position: 'relative' }}>
+                        🔔
+                        {chats.filter(c => c.isUnread).length > 0 && (
+                            <span className="nav-badge">{chats.filter(c => c.isUnread).length}</span>
+                        )}
+                    </span>
                     <span className="nav-lbl">Лента</span>
                 </button>
                 <button className={`nav-btn${tab === 'profile' ? ' nav-active' : ''}`} onClick={() => setTab('profile')}>
