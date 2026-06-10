@@ -12,7 +12,7 @@ import {
     uploadAvatar, getChatSessionKey, setTypingStatus,
     subscribeToTyping, subscribeToChats, ensureChatExists,
     subscribeToOnlineUsers, uploadFile, updateCourseProgress,
-    markChatAsRead, searchUsers,
+    markChatAsRead, searchUsers, subscribeToChatDoc,
 } from './utils/firebaseService';
 import { initECDHKeys } from './utils/e2e';
 import './App.css';
@@ -249,6 +249,10 @@ function App() {
     const [loadingMore, setLoadingMore] = useState(false);
     const msgCursorRef = useRef<any>(null);
 
+    // Read receipts & image viewer
+    const [partnerLastRead, setPartnerLastRead] = useState<Date | null>(null);
+    const [viewerImg, setViewerImg] = useState<string | null>(null);
+
     // Voice recording state
     const [isRecording, setIsRecording] = useState(false);
     const [recordDuration, setRecordDuration] = useState(0);
@@ -349,6 +353,16 @@ function App() {
         return () => unsub();
     }, [chatId, user]);
 
+    // Read receipts — track when partner last read this chat
+    useEffect(() => {
+        if (!chatId || !partner || chatId.startsWith('city_')) { setPartnerLastRead(null); return; }
+        const unsub = subscribeToChatDoc(chatId, (data) => {
+            const ts = data?.lastRead?.[partner.userId]?.toDate?.() ?? null;
+            setPartnerLastRead(ts);
+        });
+        return () => unsub();
+    }, [chatId, partner]);
+
     // Actions
     const handleAuth = async () => {
         setAuthErr('');
@@ -399,6 +413,7 @@ function App() {
     const goBack = () => {
         setPartner(null); setChatId(null); setMessages([]);
         setOlderMessages([]); setHasMoreMessages(false);
+        setPartnerLastRead(null); setViewerImg(null);
         setTab('chats');
     };
 
@@ -711,15 +726,24 @@ function App() {
                                 {msg.fileUrl && msg.fileType === 'audio/voice'
                                     ? <AudioPlayer url={msg.fileUrl} label={msg.fileName} isMe={msg.senderId === user.uid} />
                                     : msg.fileUrl && msg.fileType?.startsWith('image/')
-                                        ? <img src={msg.fileUrl} alt="" className="msg-img" />
+                                        ? <img src={msg.fileUrl} alt="" className="msg-img"
+                                            style={{ cursor: 'zoom-in' }}
+                                            onClick={() => setViewerImg(msg.fileUrl)} />
                                         : msg.fileUrl
                                             ? <div className="msg-file-chip">📎 {msg.fileName || msg.text?.replace('[File] ', '') || 'Файл'}</div>
                                             : null
                                 }
                                 {!msg.fileUrl && <p className="bubble-text">{msg.text}</p>}
-                                <span className="bubble-time">
-                                    {msg.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''}
-                                </span>
+                                <div className="bubble-footer">
+                                    <span className="bubble-time">
+                                        {msg.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''}
+                                    </span>
+                                    {msg.senderId === user.uid && !chatId?.startsWith('city_') && (
+                                        <span className={`read-receipt${partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? ' seen' : ''}`}>
+                                            {partnerLastRead && msg.timestamp && msg.timestamp <= partnerLastRead ? '✓✓' : '✓'}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                             {msg.reactions?.length > 0 && (
                                 <div className="reactions-row">
@@ -748,6 +772,13 @@ function App() {
                 )}
 
                 {sendErr && <div className="send-err">{sendErr}</div>}
+
+                {viewerImg && (
+                    <div className="img-viewer" onClick={() => setViewerImg(null)}>
+                        <img src={viewerImg} alt="" className="img-viewer-img" onClick={e => e.stopPropagation()} />
+                        <button className="img-viewer-close" onClick={() => setViewerImg(null)}>✕</button>
+                    </div>
+                )}
 
                 <div className="composer">
                     <button className="composer-btn" onClick={() => fileRef.current?.click()}>📎</button>

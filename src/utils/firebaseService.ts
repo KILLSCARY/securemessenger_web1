@@ -245,6 +245,14 @@ export const addReaction = async (chatId: string, messageId: string, userId: str
     }
 };
 
+export const subscribeToChatDoc = (chatId: string, callback: (data: any) => void) => {
+    return onSnapshot(doc(db, 'chats', chatId), (snap) => {
+        if (snap.exists()) callback(snap.data());
+    }, (err) => {
+        console.error('Chat doc error:', err);
+    });
+};
+
 export const markChatAsRead = async (chatId: string, userId: string) => {
     try {
         await updateDoc(doc(db, 'chats', chatId), {
