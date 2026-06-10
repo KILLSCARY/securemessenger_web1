@@ -598,6 +598,46 @@ input  { font-family: inherit; }
 .bottom-nav { padding: 0 4px; }
 .nav-btn { min-width: 0; flex: 1; }
 
+/* ── Compose button ──────────────────────────────────────────────── */
+.compose-btn {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(234,179,8,.1); border: 1px solid rgba(234,179,8,.3);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+}
+.compose-btn:active { opacity: .7; }
+
+/* ── New chat overlay ────────────────────────────────────────────── */
+.new-chat-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
+}
+.new-chat-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.new-chat-input {
+    flex: 1; padding: 11px 16px;
+    background: var(--card); border: 1.5px solid var(--border);
+    border-radius: 18px; color: var(--text); font-size: 15px;
+    transition: border-color .2s;
+}
+.new-chat-input:focus { outline: none; border-color: var(--accent); }
+.new-chat-input::placeholder { color: var(--sub); }
+.new-chat-list {
+    flex: 1; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+.new-chat-loading {
+    text-align: center; padding: 24px;
+    color: var(--sub); font-size: 14px;
+}
+
 /* ── Settings toast ─────────────────────────────────────────────── */
 .settings-toast {
     margin: 10px 16px 0;

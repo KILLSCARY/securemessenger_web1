@@ -52,6 +52,7 @@ export const createUserProfile = async (userId: string, username: string, email:
     try {
         const userDoc = {
             userId, username, email,
+            usernameLower: username.toLowerCase(),
             avatar: null,
             status: 'online',
             lastSeen: serverTimestamp(),
@@ -94,11 +95,33 @@ export const getUserProfile = async (userId: string) => {
 
 export const updateUserProfile = async (userId: string, updates: any) => {
     try {
-        await setDoc(doc(db, 'users', userId), { userId, lastSeen: serverTimestamp(), ...updates }, { merge: true });
-        // Invalidate cache so next read gets fresh data
+        const enriched: any = { userId, lastSeen: serverTimestamp(), ...updates };
+        if (updates.username) enriched.usernameLower = updates.username.toLowerCase();
+        await setDoc(doc(db, 'users', userId), enriched, { merge: true });
         profileCache.delete(userId);
     } catch (error) {
         console.error('Error updating profile:', error);
+    }
+};
+
+export const searchUsers = async (searchText: string, currentUserId: string): Promise<any[]> => {
+    const q = searchText.toLowerCase().trim();
+    if (q.length < 2) return [];
+    try {
+        const snap = await getDocs(
+            query(
+                collection(db, 'users'),
+                where('usernameLower', '>=', q),
+                where('usernameLower', '<=', q + ''),
+                limit(20)
+            )
+        );
+        return snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter((u: any) => u.userId && u.userId !== currentUserId);
+    } catch (e) {
+        console.error('searchUsers error:', e);
+        return [];
     }
 };
 

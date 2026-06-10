@@ -12,7 +12,7 @@ import {
     uploadAvatar, getChatSessionKey, setTypingStatus,
     subscribeToTyping, subscribeToChats, ensureChatExists,
     subscribeToOnlineUsers, uploadFile, updateCourseProgress,
-    markChatAsRead,
+    markChatAsRead, searchUsers,
 } from './utils/firebaseService';
 import { initECDHKeys } from './utils/e2e';
 import './App.css';
@@ -183,6 +183,12 @@ function IcoSend() {
 function IcoArrow() {
     return <svg width={16} height={16} viewBox="0 0 24 24" fill="none"><path d="M9 6L15 12L9 18" stroke="#7A7A62" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
+function IcoCompose() {
+    return <svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+        <path d="M12 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L12 14l-4 1 1-4 7.5-7.5z" stroke="#EAB308" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>;
+}
 
 // ── App ───────────────────────────────────────────────────────────
 function App() {
@@ -209,6 +215,13 @@ function App() {
     const [tab, setTab] = useState('chats');
     const [searchQuery, setSearchQuery] = useState('');
     const [settingsToast, setSettingsToast] = useState('');
+
+    // New chat / user search
+    const [showNewChat, setShowNewChat] = useState(false);
+    const [newChatSearch, setNewChatSearch] = useState('');
+    const [userResults, setUserResults] = useState<any[]>([]);
+    const [searchingUsers, setSearchingUsers] = useState(false);
+    const userSearchTimer = useRef<any>(null);
     const [showEmoji, setShowEmoji] = useState(false);
     const [reactionFor, setReactionFor] = useState<string | null>(null);
     const [cityOpen, setCityOpen] = useState(true);
@@ -262,10 +275,11 @@ function App() {
                 // Init ECDH keys and store public key in profile
                 try {
                     const publicKeyJwk = await initECDHKeys(fu.uid);
-                    await updateUserProfile(fu.uid, { status: 'online', ecdhPublicKey: publicKeyJwk });
+                    // Pass username so updateUserProfile sets usernameLower for existing users too
+                    await updateUserProfile(fu.uid, { status: 'online', ecdhPublicKey: publicKeyJwk, ...(p?.username && { username: p.username }) });
                 } catch (e) {
                     console.warn('ECDH init failed:', e);
-                    await updateUserProfile(fu.uid, { status: 'online' });
+                    await updateUserProfile(fu.uid, { status: 'online', ...(p?.username && { username: p.username }) });
                 }
                 setProfile(p);
                 setCourseProgress(p?.courseProgress || {});
@@ -377,6 +391,7 @@ function App() {
         setSessionKey(key);
         setPartner({ userId: pid, username: pname, avatar: pava });
         setSearchQuery('');
+        closeNewChat();
         setTab('chat');
         markChatAsRead(cid, user.uid);
     };
@@ -385,6 +400,25 @@ function App() {
         setPartner(null); setChatId(null); setMessages([]);
         setOlderMessages([]); setHasMoreMessages(false);
         setTab('chats');
+    };
+
+    const closeNewChat = () => {
+        setShowNewChat(false);
+        setNewChatSearch('');
+        setUserResults([]);
+        clearTimeout(userSearchTimer.current);
+    };
+
+    const handleUserSearch = (value: string) => {
+        setNewChatSearch(value);
+        clearTimeout(userSearchTimer.current);
+        if (!value.trim()) { setUserResults([]); setSearchingUsers(false); return; }
+        setSearchingUsers(true);
+        userSearchTimer.current = setTimeout(async () => {
+            const results = await searchUsers(value, user.uid);
+            setUserResults(results);
+            setSearchingUsers(false);
+        }, 300);
     };
 
     const send = async () => {
@@ -765,6 +799,9 @@ function App() {
                                 <div className="eyebrow">NSS</div>
                                 <h1 className="page-title">Сообщения</h1>
                             </div>
+                            <button className="compose-btn" onClick={() => setShowNewChat(true)}>
+                                <IcoCompose />
+                            </button>
                         </div>
 
                         <div className="search-row">
@@ -1018,6 +1055,90 @@ function App() {
                             </div>
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* NEW CHAT OVERLAY */}
+            {showNewChat && (
+                <div className="new-chat-overlay">
+                    <div className="new-chat-header">
+                        <button className="icon-btn" onClick={closeNewChat}><IcoBack /></button>
+                        <input
+                            className="new-chat-input"
+                            placeholder="Поиск пользователей..."
+                            value={newChatSearch}
+                            onChange={e => handleUserSearch(e.target.value)}
+                            autoFocus
+                        />
+                    </div>
+                    <div className="new-chat-list">
+                        {!newChatSearch && (
+                            <>
+                                {online.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Онлайн сейчас</div>
+                                        {online.map((u: any) => (
+                                            <div key={u.userId} className="chat-row" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                                <Ava src={u.avatar} name={u.username} size={52} online />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top"><span className="chat-name">{u.username}</span></div>
+                                                    <span className="chat-preview" style={{ color: 'var(--success)' }}>онлайн</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                                {chats.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Недавние</div>
+                                        {chats.map((ch: any) => {
+                                            const p = ch.partner;
+                                            return (
+                                                <div key={ch.chatId} className="chat-row" onClick={() => startChat(ch.partnerId, p?.username, p?.avatar)}>
+                                                    <Ava src={p?.avatar} name={p?.username || '?'} size={52} />
+                                                    <div className="chat-info">
+                                                        <div className="chat-row-top"><span className="chat-name">{p?.username}</span></div>
+                                                        <span className="chat-preview">{ch.lastMessage}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </>
+                                )}
+                                {online.length === 0 && chats.length === 0 && (
+                                    <div className="empty-state"><p>Начните вводить имя для поиска</p></div>
+                                )}
+                            </>
+                        )}
+                        {newChatSearch && (
+                            <>
+                                {searchingUsers && <div className="new-chat-loading">Поиск...</div>}
+                                {!searchingUsers && userResults.length > 0 && (
+                                    <>
+                                        <div className="list-section-plain">Результаты</div>
+                                        {userResults.map((u: any) => (
+                                            <div key={u.userId} className="chat-row" onClick={() => startChat(u.userId, u.username, u.avatar)}>
+                                                <Ava src={u.avatar} name={u.username} size={52}
+                                                    online={online.some((o: any) => o.userId === u.userId)} />
+                                                <div className="chat-info">
+                                                    <div className="chat-row-top">
+                                                        <span className="chat-name">{u.username}</span>
+                                                        {online.some((o: any) => o.userId === u.userId) && (
+                                                            <span style={{ fontSize: 11, color: 'var(--success)' }}>онлайн</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="chat-preview">@{u.username?.toLowerCase().replace(/\s/g, '')}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                                {!searchingUsers && userResults.length === 0 && (
+                                    <div className="empty-state"><p>Пользователь не найден</p></div>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             )}
 
