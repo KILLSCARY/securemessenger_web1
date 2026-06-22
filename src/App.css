@@ -1170,10 +1170,212 @@ body {
     .tab-item:hover {
         opacity: 1;
     }
-    
+
     .chat-card:active,
     .primary-button:active,
     .tab-item:active {
         opacity: 0.7;
     }
+}
+
+/* ─── Call Screens ─── */
+
+.call-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 64px 28px 52px;
+    background: linear-gradient(160deg, #13102e 0%, #0A0B10 45%, #0c1a2c 100%);
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.call-screen-active {
+    background: linear-gradient(160deg, #0e1528 0%, #0A0B10 50%, #0a1420 100%);
+}
+
+.call-bg-glow {
+    position: absolute;
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 320px;
+    height: 320px;
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.18);
+    filter: blur(90px);
+    pointer-events: none;
+}
+
+.call-screen-active .call-bg-glow {
+    background: rgba(52, 211, 153, 0.1);
+}
+
+.call-screen-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    flex: 1;
+    justify-content: center;
+}
+
+.call-avatar-wrap {
+    position: relative;
+    width: 140px;
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 28px;
+}
+
+.call-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1.5px solid rgba(139, 92, 246, 0.45);
+    animation: callRingPulse 2.4s ease-out infinite;
+}
+
+.call-ring:nth-child(1) { animation-delay: 0s; }
+.call-ring:nth-child(2) { animation-delay: 0.7s; }
+.call-ring:nth-child(3) { animation-delay: 1.4s; }
+
+@keyframes callRingPulse {
+    0%   { width: 136px; height: 136px; opacity: 0.9; }
+    100% { width: 290px; height: 290px; opacity: 0; }
+}
+
+.call-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    font-weight: 900;
+    color: white;
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    z-index: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.call-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.call-name {
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--text);
+    text-align: center;
+    margin-top: 20px;
+    letter-spacing: -0.5px;
+}
+
+.call-status {
+    font-size: 15px;
+    color: var(--subtext);
+    margin-top: 10px;
+    text-align: center;
+    letter-spacing: 0.3px;
+}
+
+.calling-dots span {
+    animation: callingDot 1.4s infinite;
+    opacity: 0;
+}
+.calling-dots span:nth-child(2) { animation-delay: 0.25s; }
+.calling-dots span:nth-child(3) { animation-delay: 0.5s; }
+
+@keyframes callingDot {
+    0%, 100% { opacity: 0; }
+    50%       { opacity: 1; }
+}
+
+.call-duration {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--success);
+    margin-top: 12px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 3px;
+}
+
+.call-e2e-badge {
+    margin-top: 14px;
+    font-size: 12px;
+    color: rgba(52, 211, 153, 0.7);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.call-controls {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.call-ctrl-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+}
+
+.call-ctrl-circle {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, opacity 0.15s;
+}
+
+.call-ctrl-circle:active {
+    transform: scale(0.92);
+    opacity: 0.8;
+}
+
+.call-ctrl-circle.dark {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.call-ctrl-circle.active {
+    background: var(--accent);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.call-ctrl-circle.danger {
+    background: var(--danger);
+    width: 72px;
+    height: 72px;
+    border: none;
+    box-shadow: 0 0 32px rgba(255, 92, 122, 0.4);
+}
+
+.call-ctrl-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    letter-spacing: 0.2px;
 }

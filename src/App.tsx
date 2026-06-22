@@ -66,6 +66,20 @@ import './App.css';
 const REACTIONS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 const EMOJIS = ['😀', '😂', '😍', '🥰', '😎', '🤔', '😅', '😭', '😤', '🥳', '😴', '🤯', '👍', '👎', '👋', '🙏', '💪', '🎉', '🔥', '❤️', '💔', '✨', '🌟', '💯'];
 
+const CALL_HISTORY = [
+    { id: '1', name: 'Sofia', initial: 'S', type: 'incoming', time: 'Сегодня, 09:12', duration: '3:21' },
+    { id: '2', name: 'Alex', initial: 'A', type: 'outgoing', time: 'Сегодня, 08:44', duration: '12:07' },
+    { id: '3', name: 'Maya', initial: 'M', type: 'missed', time: 'Вчера, 23:55', duration: null },
+    { id: '4', name: 'Ivan', initial: 'I', type: 'incoming', time: 'Вчера, 18:30', duration: '1:45' },
+    { id: '5', name: 'Kate', initial: 'K', type: 'missed', time: 'Вчера, 15:22', duration: null },
+];
+
+function formatDuration(seconds: number) {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
 function IconChat({ color = '#fff', size = 22 }) {
     return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -108,6 +122,63 @@ function IconSend({ color = '#fff', size = 20 }) {
     );
 }
 
+function IconMicBtn({ color = '#fff', size = 22, muted = false }) {
+    return muted ? (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" stroke={color} strokeWidth="1.8"/>
+            <path d="M5 10v2a7 7 0 0014 0v-2" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+            <line x1="12" y1="19" x2="12" y2="22" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+            <line x1="2" y1="2" x2="22" y2="22" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+    ) : (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <rect x="9" y="2" width="6" height="12" rx="3" stroke={color} strokeWidth="1.8"/>
+            <path d="M5 10v2a7 7 0 0014 0v-2" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+            <line x1="12" y1="19" x2="12" y2="22" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+            <line x1="8" y1="22" x2="16" y2="22" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+    );
+}
+
+function IconSpeakerBtn({ color = '#fff', size = 22, off = false }) {
+    return off ? (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <line x1="23" y1="9" x2="17" y2="15" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+            <line x1="17" y1="9" x2="23" y2="15" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+    ) : (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M15.54 8.46a5 5 0 010 7.07" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+    );
+}
+
+function IconVideoBtn({ color = '#fff', size = 22, off = false }) {
+    return off ? (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <path d="M17 10l4-2v8l-4-2" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <rect x="1" y="6" width="15" height="12" rx="2" stroke={color} strokeWidth="1.8"/>
+            <line x1="1" y1="1" x2="23" y2="23" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+    ) : (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <path d="M17 10l4-2v8l-4-2" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <rect x="1" y="6" width="15" height="12" rx="2" stroke={color} strokeWidth="1.8"/>
+        </svg>
+    );
+}
+
+function IconPhoneDown({ color = '#fff', size = 26 }) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.63 19.79 19.79 0 01.36 1 2 2 0 012.35-.02h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.34 6.73a16 16 0 002.57 3.41" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <line x1="23" y1="1" x2="1" y2="23" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+    );
+}
+
 function App() {
     const [user, setUser] = useState(null);
     const [userProfile, setUserProfile] = useState(null);
@@ -136,9 +207,18 @@ function App() {
     const [theme, setTheme] = useState('dark');
     const [selectedFile, setSelectedFile] = useState(null);
 
+    const [callState, setCallState] = useState<'calling' | 'active' | null>(null);
+    const [callPartner, setCallPartner] = useState<{userId: string, username: string, avatar?: string | null} | null>(null);
+    const [callDuration, setCallDuration] = useState(0);
+    const [callMuted, setCallMuted] = useState(false);
+    const [callSpeaker, setCallSpeaker] = useState(true);
+    const [callVideo, setCallVideo] = useState(false);
+
     const fileInputRef = useRef(null);
     const messagesEndRef = useRef(null);
     const typingTimeoutRef = useRef(null);
+    const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const callConnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -345,6 +425,29 @@ function App() {
         setShowEmojiPicker(false);
     };
 
+    const startCall = () => {
+        if (!currentPartner) return;
+        setCallPartner(currentPartner);
+        setCallState('calling');
+        setCallDuration(0);
+        setCallMuted(false);
+        setCallVideo(false);
+        callConnectRef.current = setTimeout(() => {
+            setCallState('active');
+            callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000);
+        }, 3000);
+    };
+
+    const endCall = () => {
+        if (callConnectRef.current) clearTimeout(callConnectRef.current);
+        if (callTimerRef.current) clearInterval(callTimerRef.current);
+        setCallState(null);
+        setCallPartner(null);
+        setCallDuration(0);
+        setCallMuted(false);
+        setCallVideo(false);
+    };
+
     if (loading) {
         return (
             <div className="loading-screen">
@@ -503,7 +606,7 @@ function App() {
                                 </div>
                             </div>
                         </div>
-                        <button className="header-circle-btn-small">
+                        <button className="header-circle-btn-small" onClick={startCall}>
                             <IconCall />
                         </button>
                     </div>
@@ -777,30 +880,52 @@ function App() {
 
                         {activeTab === 'calls' && (
                             <div className="calls-wrap">
-                                <div className="chat-card">
-                                    <div className="avatar">
-                                        <div style={{ 
-                                            width: '100%', 
-                                            height: '100%', 
-                                            borderRadius: '50%', 
-                                            background: '#8B5CF6',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: 'white',
-                                            fontSize: 20,
-                                            fontWeight: 800
-                                        }}>S</div>
+                                {CALL_HISTORY.map((call) => (
+                                    <div key={call.id} className="chat-card">
+                                        <div className="avatar">
+                                            <div style={{
+                                                width: '100%',
+                                                height: '100%',
+                                                borderRadius: '50%',
+                                                background: call.type === 'missed' ? 'rgba(255,92,122,0.15)' : call.type === 'outgoing' ? 'rgba(91,140,255,0.15)' : 'rgba(52,211,153,0.15)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                color: call.type === 'missed' ? '#FF5C7A' : call.type === 'outgoing' ? '#5B8CFF' : '#34D399',
+                                                fontSize: 20,
+                                                fontWeight: 800
+                                            }}>
+                                                {call.initial}
+                                            </div>
+                                        </div>
+                                        <div className="chat-mid">
+                                            <div className="chat-top-row">
+                                                <span className="chat-name" style={{ color: call.type === 'missed' ? '#FF5C7A' : 'var(--text)' }}>
+                                                    {call.name}
+                                                </span>
+                                                <span className="chat-time">{call.time}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                                                <span style={{
+                                                    fontSize: 12,
+                                                    fontWeight: 700,
+                                                    color: call.type === 'missed' ? 'var(--danger)' : call.type === 'outgoing' ? 'var(--accent2)' : 'var(--success)'
+                                                }}>
+                                                    {call.type === 'missed' ? '↙ Пропущен' : call.type === 'outgoing' ? '↗ Исходящий' : '↙ Входящий'}
+                                                </span>
+                                                {call.duration && (
+                                                    <span style={{ color: 'var(--subtext)', fontSize: 12 }}>{call.duration}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="call-icon-wrap" style={{
+                                            background: call.type === 'missed' ? 'rgba(255,92,122,0.12)' : 'var(--card2)',
+                                            border: `1px solid ${call.type === 'missed' ? 'rgba(255,92,122,0.25)' : 'var(--border)'}`
+                                        }}>
+                                            <IconCall color={call.type === 'missed' ? '#FF5C7A' : call.type === 'outgoing' ? '#5B8CFF' : '#34D399'} />
+                                        </div>
                                     </div>
-                                    <div className="chat-mid">
-                                        <span className="chat-name">Sofia</span>
-                                        <span className="chat-username">Incoming video</span>
-                                        <span className="chat-time">Сегодня, 09:12</span>
-                                    </div>
-                                    <div className="call-icon-wrap">
-                                        <IconCall />
-                                    </div>
-                                </div>
+                                ))}
                             </div>
                         )}
 
@@ -879,6 +1004,92 @@ function App() {
                         </div>
                     </div>
                 </>
+            )}
+
+            {callState === 'calling' && callPartner && (
+                <div className="call-screen">
+                    <div className="call-bg-glow" />
+                    <div className="call-screen-body">
+                        <div className="call-avatar-wrap">
+                            <div className="call-ring" />
+                            <div className="call-ring" />
+                            <div className="call-ring" />
+                            <div className="call-avatar">
+                                {callPartner.avatar
+                                    ? <img src={callPartner.avatar} alt="" />
+                                    : callPartner.username?.[0]?.toUpperCase() || '?'
+                                }
+                            </div>
+                        </div>
+                        <div className="call-name">{callPartner.username}</div>
+                        <div className="call-status">
+                            Вызов<span className="calling-dots"><span>.</span><span>.</span><span>.</span></span>
+                        </div>
+                    </div>
+                    <div className="call-controls">
+                        <button className="call-ctrl-btn" onClick={() => setCallMuted(m => !m)}>
+                            <div className={`call-ctrl-circle ${callMuted ? 'active' : 'dark'}`}>
+                                <IconMicBtn color="#fff" size={22} muted={callMuted} />
+                            </div>
+                            <span className="call-ctrl-label">{callMuted ? 'Выкл.' : 'Микрофон'}</span>
+                        </button>
+                        <button className="call-ctrl-btn" onClick={endCall}>
+                            <div className="call-ctrl-circle danger">
+                                <IconPhoneDown color="#fff" size={24} />
+                            </div>
+                            <span className="call-ctrl-label">Завершить</span>
+                        </button>
+                        <button className="call-ctrl-btn" onClick={() => setCallSpeaker(s => !s)}>
+                            <div className={`call-ctrl-circle ${!callSpeaker ? 'active' : 'dark'}`}>
+                                <IconSpeakerBtn color="#fff" size={22} off={!callSpeaker} />
+                            </div>
+                            <span className="call-ctrl-label">Динамик</span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {callState === 'active' && callPartner && (
+                <div className="call-screen call-screen-active">
+                    <div className="call-bg-glow" />
+                    <div className="call-screen-body">
+                        <div className="call-avatar" style={{ width: 120, height: 120, fontSize: 48, margin: '0 auto' }}>
+                            {callPartner.avatar
+                                ? <img src={callPartner.avatar} alt="" />
+                                : callPartner.username?.[0]?.toUpperCase() || '?'
+                            }
+                        </div>
+                        <div className="call-name">{callPartner.username}</div>
+                        <div className="call-duration">{formatDuration(callDuration)}</div>
+                        <div className="call-e2e-badge">🔒 E2E Encrypted</div>
+                    </div>
+                    <div className="call-controls">
+                        <button className="call-ctrl-btn" onClick={() => setCallMuted(m => !m)}>
+                            <div className={`call-ctrl-circle ${callMuted ? 'active' : 'dark'}`}>
+                                <IconMicBtn color="#fff" size={22} muted={callMuted} />
+                            </div>
+                            <span className="call-ctrl-label">{callMuted ? 'Выкл.' : 'Микрофон'}</span>
+                        </button>
+                        <button className="call-ctrl-btn" onClick={endCall}>
+                            <div className="call-ctrl-circle danger">
+                                <IconPhoneDown color="#fff" size={24} />
+                            </div>
+                            <span className="call-ctrl-label">Завершить</span>
+                        </button>
+                        <button className="call-ctrl-btn" onClick={() => setCallSpeaker(s => !s)}>
+                            <div className={`call-ctrl-circle ${!callSpeaker ? 'active' : 'dark'}`}>
+                                <IconSpeakerBtn color="#fff" size={22} off={!callSpeaker} />
+                            </div>
+                            <span className="call-ctrl-label">Динамик</span>
+                        </button>
+                        <button className="call-ctrl-btn" onClick={() => setCallVideo(v => !v)}>
+                            <div className={`call-ctrl-circle ${callVideo ? 'active' : 'dark'}`}>
+                                <IconVideoBtn color="#fff" size={22} off={!callVideo} />
+                            </div>
+                            <span className="call-ctrl-label">Камера</span>
+                        </button>
+                    </div>
+                </div>
             )}
 
             {showProfile && (
