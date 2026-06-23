@@ -448,6 +448,18 @@ function App() {
         setCallVideo(false);
     };
 
+    const filteredChats = searchQuery
+        ? chats.filter(chat =>
+            chat.partner?.username?.toLowerCase().includes(searchQuery.toLowerCase())
+          )
+        : chats;
+
+    const filteredOnlineUsers = searchQuery
+        ? onlineUsers.filter(u =>
+            u.username?.toLowerCase().includes(searchQuery.toLowerCase())
+          )
+        : onlineUsers;
+
     if (loading) {
         return (
             <div className="loading-screen">
@@ -747,7 +759,7 @@ function App() {
                         {activeTab === 'chats' && (
                             <>
                                 <div className="story-row">
-                                    {onlineUsers.map((u) => (
+                                    {filteredOnlineUsers.map((u) => (
                                         <div key={u.userId} className="story-item" onClick={() => startChat(u.userId, u.username)}>
                                             <div className="story-avatar-wrap">
                                                 <div className="story-avatar" style={{ 
@@ -772,7 +784,7 @@ function App() {
                                 </div>
 
                                 <div className="chat-list">
-                                    {chats.map((chat) => {
+                                    {filteredChats.map((chat) => {
                                         const partner = chat.partner;
                                         return (
                                             <div 
@@ -830,7 +842,7 @@ function App() {
                                         );
                                     })}
 
-                                    {chats.length === 0 && onlineUsers.length > 0 && onlineUsers.map((u) => (
+                                    {filteredChats.length === 0 && filteredOnlineUsers.length > 0 && filteredOnlineUsers.map((u) => (
                                         <div key={u.userId} className="chat-card" onClick={() => startChat(u.userId, u.username, u.avatar)}>
                                             <div className="avatar">
                                                 <div style={{ 
@@ -863,13 +875,13 @@ function App() {
                                         </div>
                                     ))}
 
-                                    {chats.length === 0 && onlineUsers.length === 0 && !searchQuery && (
+                                    {filteredChats.length === 0 && filteredOnlineUsers.length === 0 && (
                                         <div className="no-users">
-                                            Нет чатов. Начните общение с пользователями ниже!
+                                            {searchQuery ? `Нет результатов для "${searchQuery}"` : 'Нет чатов. Начните общение с пользователями ниже!'}
                                         </div>
                                     )}
 
-                                    {!searchQuery && onlineUsers.length > 0 && chats.length > 0 && (
+                                    {!searchQuery && filteredOnlineUsers.length > 0 && filteredChats.length > 0 && (
                                         <div style={{ padding: '12px', color: '#8C93A8', fontSize: 13 }}>
                                             Новые пользователи
                                         </div>
